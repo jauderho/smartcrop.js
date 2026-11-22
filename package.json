@@ -17,7 +17,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "grunt": "^1.6.3",
     "grunt-cli": "^1.5.0",
-    "grunt-contrib-connect": "~4.0.0",
+    "grunt-contrib-connect": "~5.0.1",
     "grunt-contrib-watch": "^1.1.0",
     "grunt-rsync": "~3.0.0",
     "karma": "^6.4.4",
