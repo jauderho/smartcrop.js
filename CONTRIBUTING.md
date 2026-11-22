@@ -37,14 +37,13 @@ By contributing your code, you agree to license your contribution under the MIT 
 
 ## Setting up the development environment
 
-Before you can start working you'll need to have node.js and git installed.
+Before you can start working you'll need to have [bun](https://bun.sh) and git installed.
 
 ```
 $ git clone
-$ cd normalmap.js
-$ npm install -g grunt jshint jscs
-$ npm install
-$ grunt
+$ cd smartcrop.js
+$ bun install
+$ bun run start
 ```
 
 I work on GNU/Linux. Things might not work on windows.
