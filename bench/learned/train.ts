@@ -58,6 +58,15 @@ const valName = valNames[0];
 const fcdbW = Number(opt("fcdb", "0"));
 const ppi = Number(opt("ppi", "64"));
 const epochs = Number(opt("epochs", "40"));
+// --lambda a: LambdaRank-style pair weights (|delta NDCG| of swapping the
+// pair under the current ranking), mixed as (1 - a) + a * normalised weight,
+// to focus training on the top of each image's ranking.
+const lambdaMix = Number(opt("lambda", "0"));
+// --ema d: keep an exponential moving average of the weights (decay d per
+// optimiser step) and evaluate/select/write that instead of the raw weights.
+const emaDecay = Number(opt("ema", "0"));
+// --cosine: cosine learning-rate decay instead of linear decay in the second half.
+const cosine = args.includes("--cosine");
 
 const train = await Promise.all(sets.map(load));
 const vals = await Promise.all(valNames.map(load));
@@ -281,6 +290,11 @@ function fit(cfg: Cfg, verbose: boolean) {
   const v = tensors.map((t) => new Float64Array(t.length));
   const g = tensors.map((t) => new Float64Array(t.length));
   let step = 0;
+  const shadow: Net | null =
+    emaDecay > 0
+      ? { sizes: net.sizes, W: net.W.map((x) => x.slice()), B: net.B.map((x) => x.slice()) }
+      : null;
+  const shadowTensors = shadow ? [...shadow.W, ...shadow.B] : [];
 
   type Item = { ds: DataSet; im: DataSet["imgs"][number]; wt: number };
   const items: Item[] = [];
@@ -331,6 +345,14 @@ function fit(cfg: Cfg, verbose: boolean) {
         g[t][k] = 0;
       }
     }
+    if (shadow) {
+      for (let t = 0; t < tensors.length; t++) {
+        const S = shadowTensors[t];
+        const T = tensors[t];
+        for (let k = 0; k < T.length; k++)
+          S[k] = emaDecay * S[k] + (1 - emaDecay) * T[k];
+      }
+    }
   };
 
   let best = { srcc: -2 } as any;
@@ -340,7 +362,11 @@ function fit(cfg: Cfg, verbose: boolean) {
   const lr0 = cfg.lr;
   for (let ep = 0; ep < epochs; ep++) {
     // Linear decay of the learning rate in the second half.
-    cfg.lr = ep >= epochs / 2 ? (lr0 * (epochs - ep)) / (epochs / 2) : lr0;
+    cfg.lr = cosine
+      ? (lr0 * (1 + Math.cos((Math.PI * ep) / epochs))) / 2
+      : ep >= epochs / 2
+        ? (lr0 * (epochs - ep)) / (epochs / 2)
+        : lr0;
     for (let i = items.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       [items[i], items[j]] = [items[j], items[i]];
@@ -349,6 +375,7 @@ function fit(cfg: Cfg, verbose: boolean) {
     let loss = 0;
     let cnt = 0;
     for (const { ds, im, wt } of items) {
+      const pairs: [number, number][] = [];
       for (let q = 0; q < ppi; q++) {
         let a = 0,
           b = 0,
@@ -360,14 +387,40 @@ function fit(cfg: Cfg, verbose: boolean) {
         } while (Math.abs(im.mos[a] - im.mos[b]) <= 0.25 && tries < 30);
         if (Math.abs(im.mos[a] - im.mos[b]) <= 0.25) continue;
         if (im.mos[a] < im.mos[b]) [a, b] = [b, a];
+        pairs.push([a, b]);
+      }
+      let pw: number[] | null = null;
+      if (lambdaMix > 0 && pairs.length) {
+        // Current ranking of this image's crops, then |delta NDCG| per pair.
+        scratch = newActs(net);
+        const sc = Array.from({ length: im.n }, (_, i) => score1(net, ds.X, im.off + i));
+        const order = sc.map((_, i) => i).sort((x, y) => sc[y] - sc[x]);
+        const rank = new Array<number>(im.n);
+        order.forEach((i, r) => (rank[i] = r));
+        const gain = (m: number) => 2 ** m - 1;
+        const idcg = [...im.mos]
+          .sort((x, y) => y - x)
+          .reduce((t, m, r) => t + gain(m) / Math.log2(r + 2), 0);
+        const raw = pairs.map(
+          ([a, b]) =>
+            (Math.abs(gain(im.mos[a]) - gain(im.mos[b])) *
+              Math.abs(1 / Math.log2(rank[a] + 2) - 1 / Math.log2(rank[b] + 2))) /
+            idcg,
+        );
+        const mean = raw.reduce((t, x) => t + x, 0) / raw.length || 1;
+        pw = raw.map((x) => 1 - lambdaMix + (lambdaMix * x) / mean);
+      }
+      for (let q = 0; q < pairs.length; q++) {
+        const [a, b] = pairs[q];
+        const w = wt * (pw ? pw[q] : 1);
         const sa = forward(net, ds.X, im.off + a, actA);
         const sb = forward(net, ds.X, im.off + b, actB);
         const d = sa - sb;
         const sig = 1 / (1 + Math.exp(d)); // sigma(-d)
         loss += Math.log1p(Math.exp(-d));
         cnt++;
-        backward(actA, -sig * wt);
-        backward(actB, sig * wt);
+        backward(actA, -sig * w);
+        backward(actB, sig * w);
         if (++inBatch === BATCH) {
           adam(BATCH);
           inBatch = 0;
@@ -375,11 +428,12 @@ function fit(cfg: Cfg, verbose: boolean) {
       }
     }
     if (inBatch) adam(inBatch);
-    const r = evalVal(net);
+    const evalNet = shadow ?? net;
+    const r = evalVal(evalNet);
     const h = fcHolds.length
       ? {
           top1:
-            fcHolds.reduce((s, d) => s + evaluate(net, d).top1, 0) /
+            fcHolds.reduce((s, d) => s + evaluate(evalNet, d).top1, 0) /
             fcHolds.length,
         }
       : null;
@@ -393,9 +447,9 @@ function fit(cfg: Cfg, verbose: boolean) {
     if (!bestNet || score > best.score) {
       best = { ...r, score, hold: h };
       bestNet = {
-        sizes: net.sizes,
-        W: net.W.map((x) => x.slice()),
-        B: net.B.map((x) => x.slice()),
+        sizes: evalNet.sizes,
+        W: evalNet.W.map((x) => x.slice()),
+        B: evalNet.B.map((x) => x.slice()),
       };
       bestEpoch = ep;
     }
