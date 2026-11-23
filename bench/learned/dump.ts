@@ -6,7 +6,10 @@
 //          the closest ground-truth box (same 1-5 range, used as extra signal)
 //
 // Usage: bun bench/learned/dump.ts [--dataset gaicd|fcdb] [--split train|val|test]
-//          [--with faces,saliency] [--procs 8] [--limit N]
+//          [--with faces,saliency,cnn] [--cnnk 3] [--procs 8] [--limit N]
+// With cnn, each row is the hand features followed by the pooled deep features
+// (RoI KxK, RoD KxK, global; src/cnn.ts) and the file is named ...+cnn (K != 3:
+// ...+cnn<K>).
 //
 // The parent spawns --procs worker processes (each takes every procs-th image)
 // and concatenates their output. .bin is Float32 (rows of FEATURE_COUNT);
@@ -16,6 +19,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import smartcrop from '../../src/smartcrop';
 import { FEATURE_COUNT, FEATURE_NAMES } from '../../src/learned';
+import { cnnDim } from '../../src/cnn';
 import { imageKey, parseWith, pluginOptions } from '../plugin-cache';
 
 const args = process.argv.slice(2);
@@ -30,7 +34,14 @@ const limit = Number(opt('limit', '0'));
 const procs = Number(opt('procs', '8'));
 const shard = opt('shard');
 const OUT = resolve(import.meta.dir, '../out/learned');
-const name = `${dataset}-${split}${withSet.size ? '-' + [...withSet].join('+') : ''}`;
+const cnnK = withSet.has('cnn') ? Number(opt('cnnk', '3')) : 0;
+const CNN_CHANNELS = 32;
+if (cnnK) process.env.SMARTCROP_CNN_DUMP = '1'; // pool features, no head model
+const DIM = FEATURE_COUNT + (cnnK ? cnnDim(cnnK, CNN_CHANNELS) : 0);
+const label = [...withSet]
+  .map((p) => (p === 'cnn' && cnnK !== 3 ? `cnn${cnnK}` : p))
+  .join('+');
+const name = `${dataset}-${split}${withSet.size ? '-' + label : ''}`;
 const DIR = resolve(import.meta.dir, '../datasets', dataset);
 
 type Cand = [number, number, number, number, number]; // x1 y1 x2 y2 target (internal)
@@ -130,20 +141,20 @@ async function work(entries: Entry[], k: number, n: number, file: string) {
     const f = await smartcrop._features(
       img,
       e.cands.map(([x1, y1, x2, y2]) => ({ x: x1, y: y1, width: x2 - x1, height: y2 - y1 })),
-      { width: img.width, height: img.height, canvasFactory, ...po }
+      { width: img.width, height: img.height, canvasFactory, ...po, ...(cnnK ? { cnnK } : {}) }
     );
     rows.push(f);
     meta.push({ image: e.image, n: e.cands.length, off, mos: e.cands.map((c) => c[4]) });
     off += e.cands.length;
   }
-  const buf = new Float32Array(off * FEATURE_COUNT);
+  const buf = new Float32Array(off * DIM);
   let p = 0;
   for (const r of rows) {
     buf.set(r, p);
     p += r.length;
   }
   await Bun.write(file + '.bin', buf);
-  await Bun.write(file + '.json', JSON.stringify({ D: FEATURE_COUNT, images: meta }));
+  await Bun.write(file + '.json', JSON.stringify({ D: DIM, images: meta }));
 }
 
 await mkdir(OUT, { recursive: true });
@@ -173,12 +184,12 @@ for (let k = 0; k < procs; k++) {
   const m = JSON.parse(await readFile(base + '.json', 'utf8'));
   for (const im of m.images) metas.push({ ...im, off: im.off + off });
   const b = new Float32Array(await Bun.file(base + '.bin').arrayBuffer());
-  off += b.length / FEATURE_COUNT;
+  off += b.length / DIM;
   bins.push(b);
   await rm(base + '.json');
   await rm(base + '.bin');
 }
-const all = new Float32Array(off * FEATURE_COUNT);
+const all = new Float32Array(off * DIM);
 let p = 0;
 for (const b of bins) {
   all.set(b, p);
@@ -187,7 +198,7 @@ for (const b of bins) {
 await Bun.write(join(OUT, `${name}.bin`), all);
 await Bun.write(
   join(OUT, `${name}.json`),
-  JSON.stringify({ D: FEATURE_COUNT, names: FEATURE_NAMES, images: metas })
+  JSON.stringify({ D: DIM, names: FEATURE_NAMES, images: metas })
 );
 console.log(
   `${name}: ${metas.length} images, ${off} candidates, ${((performance.now() - t0) / 1000).toFixed(1)}s`

@@ -12,6 +12,10 @@
 // --fcdb w mixes fcdb-train windows into the loss with weight w; the last 15%
 // of fcdb-train images are held out to report the IoU of the top-scored window.
 // --grid runs a small hyper-parameter grid and (with --write) writes the best.
+// --cnn K trains the cnn head: the inputs are the hand features plus the pooled
+// deep features (dump.ts --with faces,saliency,cnn --cnnk K); the default sets
+// become gaicd-train/val and fcdb-train with +faces+saliency+cnn[K]. --write
+// then stores models/cnn-latest.json and shrinks to src/learned-cnn-weights.ts.
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { packModel, type LearnedModel } from "../../src/learned";
@@ -22,6 +26,7 @@ const opt = (n: string, d?: string) => {
   return i > -1 ? args[i + 1] : d;
 };
 const OUT = resolve(import.meta.dir, "../out/learned");
+const CNN_CHANNELS = 32;
 
 type DataSet = {
   D: number;
@@ -45,8 +50,10 @@ const mulberry = (a: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 
-const sets = (opt("sets", "gaicd-train") as string).split(",");
-const valNames = (opt("val", "gaicd-val") as string).split(",");
+const cnnK = Number(opt("cnn", "0"));
+const cnnSuffix = cnnK ? `-faces+saliency+cnn${cnnK === 3 ? "" : cnnK}` : "";
+const sets = (opt("sets", `gaicd-train${cnnSuffix}`) as string).split(",");
+const valNames = (opt("val", `gaicd-val${cnnSuffix}`) as string).split(",");
 const valName = valNames[0];
 const fcdbW = Number(opt("fcdb", "0"));
 const ppi = Number(opt("ppi", "64"));
@@ -59,7 +66,7 @@ const D = train[0].D;
 for (const d of [...train, ...vals])
   if (d.D !== D) throw new Error("feature count mismatch; re-run dump.ts");
 
-const fcNames = (opt("fcdbsets", "fcdb-train") as string).split(",");
+const fcNames = (opt("fcdbsets", `fcdb-train${cnnSuffix}`) as string).split(",");
 let fcs: DataSet[] = [];
 let fcHolds: DataSet[] = [];
 if (fcdbW > 0) {
@@ -407,13 +414,20 @@ const toModel = (p: Net): LearnedModel => ({
 });
 const write = async (model: LearnedModel, note: string) => {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const path = opt("out") ?? resolve(OUT, "models", `${stamp}.json`);
-  await Bun.write(path, JSON.stringify({ note, model }));
+  const path =
+    opt("out") ??
+    resolve(OUT, "models", `${cnnK ? "cnn-" : ""}${stamp}.json`);
+  const body = JSON.stringify({
+    note,
+    model,
+    ...(cnnK ? { cnn: { k: cnnK, channels: CNN_CHANNELS } } : {}),
+  });
+  await Bun.write(path, body);
   console.log(`wrote full-precision model ${path}`);
   if (opt("out")) return; // staging run: don't touch the shipped weights
   await Bun.write(
-    resolve(OUT, "models", "latest.json"),
-    JSON.stringify({ note, model }),
+    resolve(OUT, "models", cnnK ? "cnn-latest.json" : "latest.json"),
+    body,
   );
   const p = Bun.spawn(["bun", resolve(import.meta.dir, "shrink.ts"), path], {
     stdout: "inherit",

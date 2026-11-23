@@ -1,4 +1,4 @@
-// Run the ONNX plug-ins (faces, saliency) once per image and cache results in
+// Run the ONNX plug-ins (faces, saliency, cnn) once per image and cache results in
 // bench/out/cache/<dataset>/. Resumable: existing cache entries are skipped.
 //
 // Usage: bun bench/precompute.ts <fcdb|flms|gaicd|examples|strips> [--split test|train|all]
@@ -10,6 +10,7 @@ import { join, relative } from 'node:path';
 import {
   hasCache,
   imageKey,
+  loadCnn,
   loadFaces,
   loadSaliency,
   toImageData,
@@ -93,13 +94,16 @@ if (limit > 0) items = items.slice(0, limit);
 const WIDTH = 512;
 let tf = 0;
 let ts = 0;
+let tc = 0;
 let nf = 0;
 let ns = 0;
+let nc = 0;
 const t0 = performance.now();
 for (const [n, it] of items.entries()) {
   const needF = !(await hasCache(dataset, it.key, 'faces'));
   const needS = !(await hasCache(dataset, it.key, 'saliency'));
-  if (needF || needS) {
+  const needC = !(await hasCache(dataset, it.key, 'cnn'));
+  if (needF || needS || needC) {
     const img = await loadImage(it.path);
     let data: ReturnType<typeof toImageData> | undefined;
     const getData = async () => {
@@ -136,6 +140,12 @@ for (const [n, it] of items.entries()) {
       ts += performance.now() - t;
       ns++;
     }
+    t = performance.now();
+    if (needC) {
+      await loadCnn(dataset, it.key, getData);
+      tc += performance.now() - t;
+      nc++;
+    }
   }
   if ((n + 1) % 25 === 0 || n + 1 === items.length) {
     console.log(
@@ -144,5 +154,5 @@ for (const [n, it] of items.entries()) {
   }
 }
 console.log(
-  `done: faces ${nf} imgs ${nf ? (tf / nf).toFixed(0) : '-'} ms/img, saliency ${ns} imgs ${ns ? (ts / ns).toFixed(0) : '-'} ms/img`
+  `done: faces ${nf} imgs ${nf ? (tf / nf).toFixed(0) : '-'} ms/img, saliency ${ns} imgs ${ns ? (ts / ns).toFixed(0) : '-'} ms/img, cnn ${nc} imgs ${nc ? (tc / nc).toFixed(0) : '-'} ms/img`
 );

@@ -9,6 +9,11 @@
 // holdout (last 15%), all from bench/out/learned (bench/learned/dump.ts).
 // Test splits are never used.
 //
+// A model.json with a `cnn: {k, channels}` field (train.ts --cnn) is the cnn
+// head: it is checked on the +faces+saliency+cnn[K] sets only (same criteria),
+// packed together with the fixed PCA projection (bench/out/cnn/projection.bin,
+// already float16-exact) and written to src/learned-cnn-weights.ts.
+//
 // Usage: bun bench/learned/shrink.ts [model.json] [--dry-run] [--srcc-tol 0.001]
 //          [--top-tol 0] [--out src/learned-weights.ts]
 // model.json is {note, model} as written by train.ts --write (default:
@@ -18,12 +23,15 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  encodeF16,
   learnedScore,
   packModel,
   unpackModel,
   type LearnedModel,
   type PackedModel,
 } from "../../src/learned";
+import type { PackedCnn } from "../../src/cnn";
+import { PROJECTION_FILE } from "../plugin-cache";
 
 const args = process.argv.slice(2);
 const opt = (n: string, d?: string) => {
@@ -35,16 +43,20 @@ if (dryRun) args.splice(args.indexOf("--dry-run"), 1);
 const srccTol = Number(opt("srcc-tol", "0.001"));
 const topTol = Number(opt("top-tol", "0"));
 const OUT = resolve(import.meta.dir, "../out/learned");
-const outPath = opt(
-  "out",
-  resolve(import.meta.dir, "../../src/learned-weights.ts"),
-)!;
+const outOpt = opt("out");
 const modelPath = args[0] ?? resolve(OUT, "models/latest.json");
 
-const { note, model } = JSON.parse(await readFile(modelPath, "utf8")) as {
+const { note, model, cnn } = JSON.parse(await readFile(modelPath, "utf8")) as {
   note: string;
   model: LearnedModel;
+  cnn?: { k: number; channels: number };
 };
+const outPath =
+  outOpt ??
+  resolve(
+    import.meta.dir,
+    cnn ? "../../src/learned-cnn-weights.ts" : "../../src/learned-weights.ts",
+  );
 
 type DataSet = {
   D: number;
@@ -65,7 +77,10 @@ const load = async (name: string, holdout = false): Promise<DataSet | null> => {
   };
 };
 const checks: [string, DataSet][] = [];
-for (const v of ["", "-saliency", "-faces+saliency"]) {
+const variants = cnn
+  ? [`-faces+saliency+cnn${cnn.k === 3 ? "" : cnn.k}`]
+  : ["", "-saliency", "-faces+saliency"];
+for (const v of variants) {
   const g = await load(`gaicd-val${v}`);
   if (g) checks.push([`gaicd-val${v}`, g]);
   const f = await load(`fcdb-train${v}`, true);
@@ -104,6 +119,7 @@ const pearson = (x: number[], y: number[]) => {
   return sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
 };
 const run = (m: LearnedModel, ds: DataSet) => {
+  if (m.mean.length !== ds.D) throw new Error("model/feature width mismatch");
   let srcc = 0;
   const top: number[] = [];
   for (const im of ds.imgs) {
@@ -122,7 +138,7 @@ const base = checks.map(([, ds]) => run(model, ds));
 let chosen: PackedModel | null = null;
 for (const kind of ["q8", "f16", "f32"] as const) {
   const packed = packModel(model, kind);
-  const m = unpackModel(packed);
+  const m = unpackModel(packed, model.mean.length);
   let ok = true;
   const rows: string[] = [];
   checks.forEach(([name, ds], i) => {
@@ -150,7 +166,34 @@ if (!chosen)
     "no encoding passed (f32 should always pass; check the inputs)",
   );
 
-const src = `// Weights of the learned composition scorer. Trained by bench/learned/train.ts,
+let projection = "";
+if (cnn) {
+  const buf = await Bun.file(PROJECTION_FILE).arrayBuffer();
+  if (new Uint32Array(buf, 0, 1)[0] !== cnn.channels)
+    throw new Error("projection channels differ from the model");
+  projection = encodeF16(new Float32Array(buf, 4)); // already float16-exact
+}
+const packedCnn: PackedCnn | null = cnn
+  ? {
+      k: cnn.k,
+      channels: cnn.channels,
+      inChannels: 448,
+      projection,
+      head: chosen,
+    }
+  : null;
+const src = cnn
+  ? `// Weights of the optional deep-feature (cnn) head of the learned scorer. Trained by
+// bench/learned/train.ts --cnn, packed by bench/learned/shrink.ts: the head is
+// '${chosen.kind}' (smallest encoding that keeps every validation top-1 choice),
+// the fixed PCA projection of the plug-in (plugins/onnx/cnn.ts) is float16.
+// Only used together with a featureMap; not imported by the library itself.
+// ${note}
+import type { PackedCnn } from './cnn';
+
+export const LEARNED_CNN_PACKED: PackedCnn = ${JSON.stringify(packedCnn)};
+`
+  : `// Weights of the learned composition scorer. Trained by bench/learned/train.ts,
 // encoded by bench/learned/shrink.ts as '${chosen.kind}' (smallest encoding that
 // keeps every validation top-1 choice; see packModel in learned.ts).
 // ${note}

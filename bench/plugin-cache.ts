@@ -1,10 +1,15 @@
 // Shared helpers for the optional ONNX plug-ins in the benchmarks: per-image
-// cache under bench/out/cache/<dataset>/<imageKey>.{faces.json,saliency.bin}.
+// cache under bench/out/cache/<dataset>/<imageKey>.{faces.json,saliency.bin,cnn.bin}.
 // The saliency .bin is: uint32 LE width, uint32 LE height, then Float32 LE data.
+// The cnn .bin is: uint32 LE width, height, channels, then Float32 LE data
+// (channels-last, projected with bench/out/cnn/projection.bin, see
+// bench/learned/cnn-pca.ts).
 import { createCanvas } from '@napi-rs/canvas';
 import { mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { ImportanceMap } from '../src/smartcrop';
+import type { FeatureMap } from '../src/cnn';
+import { cnnFeatureMap, type CnnProjection } from '../plugins/onnx/cnn';
 import { detectFaces, type Face } from '../plugins/onnx/faces';
 import { saliencyMap } from '../plugins/onnx/saliency';
 
@@ -13,7 +18,7 @@ export type ImageDataLike = {
   height: number;
   data: Uint8ClampedArray;
 };
-export type Plugin = 'faces' | 'saliency';
+export type Plugin = 'faces' | 'saliency' | 'cnn';
 
 // Cached with a low threshold; consumers filter with a minimum score.
 export const CACHE_FACE_THRESHOLD = 0.5;
@@ -59,11 +64,49 @@ export async function loadSaliency(
   return map;
 }
 
+export const PROJECTION_FILE = join(import.meta.dir, 'out/cnn/projection.bin');
+
+/** Fixed PCA projection (Float32 LE: uint32 C, mean[448], proj[448 x C]). */
+let projection: Promise<CnnProjection> | undefined;
+export const loadProjection = (): Promise<CnnProjection> =>
+  (projection ??= (async () => {
+    const buf = await Bun.file(PROJECTION_FILE).arrayBuffer();
+    const channels = new Uint32Array(buf, 0, 1)[0];
+    const f = new Float32Array(buf, 4);
+    return { channels, mean: f.slice(0, 448), proj: f.slice(448) };
+  })());
+
+export async function loadCnn(
+  dataset: string,
+  key: string,
+  getData: () => Promise<ImageDataLike>
+): Promise<FeatureMap> {
+  const f = Bun.file(join(dirFor(dataset), `${key}.cnn.bin`));
+  if (await f.exists()) {
+    const buf = await f.arrayBuffer();
+    const [width, height, channels] = new Uint32Array(buf, 0, 3);
+    return { width, height, channels, data: new Float32Array(buf.slice(12)) };
+  }
+  const map = await cnnFeatureMap(await getData(), {
+    projection: await loadProjection(),
+  });
+  const out = new Uint8Array(12 + map.data.byteLength);
+  new Uint32Array(out.buffer, 0, 3).set([map.width, map.height, map.channels]);
+  out.set(new Uint8Array(map.data.buffer), 12);
+  await mkdir(dirFor(dataset), { recursive: true });
+  await Bun.write(f, out);
+  return map;
+}
+
 export const hasCache = (dataset: string, key: string, p: Plugin) =>
   Bun.file(
     join(
       dirFor(dataset),
-      p === 'faces' ? `${key}.faces.json` : `${key}.saliency.bin`
+      p === 'faces'
+        ? `${key}.faces.json`
+        : p === 'cnn'
+          ? `${key}.cnn.bin`
+          : `${key}.saliency.bin`
     )
   ).exists();
 
@@ -71,7 +114,7 @@ export const hasCache = (dataset: string, key: string, p: Plugin) =>
 export function parseWith(v: string | undefined): Set<Plugin> {
   const set = new Set<Plugin>();
   for (const p of (v ?? '').split(',').filter(Boolean)) {
-    if (p !== 'faces' && p !== 'saliency')
+    if (p !== 'faces' && p !== 'saliency' && p !== 'cnn')
       throw new Error(`unknown plugin ${p}`);
     set.add(p);
   }
@@ -116,6 +159,18 @@ export async function pluginOptions(
   }
   if (use.has('saliency')) {
     opts.importanceMap = await loadSaliency(dataset, key, getData);
+  }
+  if (use.has('cnn')) {
+    opts.featureMap = await loadCnn(dataset, key, getData);
+    // Head weights: a staged model (SMARTCROP_CNN_MODEL=path to a PackedCnn
+    // json, for selection runs) or the shipped ones. bench/learned/dump.ts
+    // pools features itself and sets cnnK instead.
+    const staged = process.env.SMARTCROP_CNN_MODEL;
+    if (!process.env.SMARTCROP_CNN_DUMP) {
+      opts.cnnModel = staged
+        ? await Bun.file(staged).json()
+        : (await import('../src/learned-cnn-weights')).LEARNED_CNN_PACKED;
+    }
   }
   return opts;
 }
