@@ -155,6 +155,31 @@ describe('iop.open', () => {
   });
 });
 
+describe('smartcrop.Promise', () => {
+  class CustomPromise<T> extends Promise<T> {}
+
+  it('is used by every image operation', async () => {
+    const original = smartcrop.Promise;
+    smartcrop.Promise = CustomPromise;
+    try {
+      const iop = internals._canvasImageOperations(createCanvas);
+      const c = createCanvas(16, 16);
+      const opened = iop.open(c);
+      const resampled = iop.resample(c, 8, 8);
+      const data = iop.getData(c);
+      expect(opened).toBeInstanceOf(CustomPromise);
+      expect(resampled).toBeInstanceOf(CustomPromise);
+      expect(data).toBeInstanceOf(CustomPromise);
+      expect((await resampled) as { width: number }).toMatchObject({
+        width: 8,
+      });
+      expect((await data).width).toBe(16);
+    } finally {
+      smartcrop.Promise = original;
+    }
+  });
+});
+
 describe('_downSample', () => {
   function mono2rgba(input: number[]) {
     const output = new Uint8ClampedArray(input.length * 4);

@@ -54,6 +54,8 @@ export interface CropOptions {
   debug?: boolean;
 }
 declare const smartcrop: {
+  /** Promise implementation to use. Defaults to the global Promise. */
+  Promise: PromiseConstructor;
   DEFAULTS: Required<Omit<CropOptions, 'aspect' | 'boost' | 'input'>>;
   crop(
     image: CanvasImageSource | unknown,

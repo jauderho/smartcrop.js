@@ -24,6 +24,62 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+/**
+ * @typedef {{ x: number, y: number, width: number, height: number, weight: number }} Boost
+ * @typedef {{ detail: number, saturation: number, skin: number, boost: number, total: number }} Score
+ * @typedef {{ x: number, y: number, width: number, height: number, score?: Score }} Crop
+ * @typedef {{ width: number, height: number, data: Uint8ClampedArray }} ImageDataLike
+ * @typedef {{ width: number, height: number, getContext(contextId: '2d'): CanvasRenderingContext2D | null }} Canvas
+ * @typedef {(width: number, height: number) => Canvas} CanvasFactory
+ *
+ * @typedef {object} ImageOperations
+ * @property {(image: any, inputOptions?: any) => Promise<any>} open
+ * @property {(image: any, width: number, height: number) => Promise<any>} resample
+ * @property {(image: any) => Promise<ImageDataLike>} getData
+ *
+ * @typedef {object} Options
+ * @property {number} width
+ * @property {number} height
+ * @property {number} aspect
+ * @property {number} cropWidth
+ * @property {number} cropHeight
+ * @property {number} detailWeight
+ * @property {number[]} skinColor
+ * @property {number} skinBias
+ * @property {number} skinBrightnessMin
+ * @property {number} skinBrightnessMax
+ * @property {number} skinThreshold
+ * @property {number} skinWeight
+ * @property {number} saturationBrightnessMin
+ * @property {number} saturationBrightnessMax
+ * @property {number} saturationThreshold
+ * @property {number} saturationBias
+ * @property {number} saturationWeight
+ * @property {number} scoreDownSample
+ * @property {number} step
+ * @property {number} scaleStep
+ * @property {number} minScale
+ * @property {number} maxScale
+ * @property {number} edgeRadius
+ * @property {number} edgeWeight
+ * @property {number} outsideImportance
+ * @property {number} boostWeight
+ * @property {boolean} ruleOfThirds
+ * @property {boolean} prescale
+ * @property {ImageOperations | null} imageOperations
+ * @property {CanvasFactory} canvasFactory
+ * @property {boolean} debug
+ * @property {Boost[]} [boost]
+ * @property {any} [input]
+ *
+ * @typedef {object} CropResult
+ * @property {Crop} topCrop
+ * @property {Crop[]} [crops]
+ * @property {ImageDataLike} [debugOutput]
+ * @property {Options} [debugOptions]
+ * @property {Crop} [debugTopCrop]
+ */
+
 (function () {
   'use strict';
 
@@ -33,8 +89,13 @@
     throw new Error('No native promises and smartcrop.Promise not set.');
   }
 
-  smartcrop.Promise = typeof Promise !== 'undefined' ? Promise : NoPromises;
+  /** @type {PromiseConstructor} */
+  smartcrop.Promise =
+    typeof Promise !== 'undefined'
+      ? Promise
+      : /** @type {PromiseConstructor} */ (/** @type {unknown} */ (NoPromises));
 
+  /** @type {Options} */
   smartcrop.DEFAULTS = {
     width: 0,
     height: 0,
@@ -71,7 +132,14 @@
     debug: false,
   };
 
+  /**
+   * @param {any} inputImage
+   * @param {Partial<Options>} [options_]
+   * @param {(result: CropResult) => void} [callback]
+   * @returns {Promise<CropResult>}
+   */
   smartcrop.crop = function (inputImage, options_, callback) {
+    /** @type {Options} */
     var options = extend({}, smartcrop.DEFAULTS, options_);
 
     if (options.aspect) {
@@ -83,7 +151,7 @@
       options.imageOperations = canvasImageOperations(options.canvasFactory);
     }
 
-    var iop = options.imageOperations;
+    var iop = /** @type {ImageOperations} */ (options.imageOperations);
 
     var scale = 1;
     var prescale = 1;
@@ -91,72 +159,77 @@
     // open the image
     return iop
       .open(inputImage, options.input)
-      .then(function (image) {
-        // calculate desired crop dimensions based on the image size
-        if (options.width && options.height) {
-          scale = min(
-            image.width / options.width,
-            image.height / options.height
-          );
-          options.cropWidth = ~~(options.width * scale);
-          options.cropHeight = ~~(options.height * scale);
-          // Img = 100x100, width = 95x95, scale = 100/95, 1/scale > min
-          // don't set minscale smaller than 1/scale
-          // -> don't pick crops that need upscaling
-          options.minScale = min(
-            options.maxScale,
-            max(1 / scale, options.minScale)
-          );
+      .then(
+        /** @param {any} image */ function (image) {
+          // calculate desired crop dimensions based on the image size
+          if (options.width && options.height) {
+            scale = min(
+              image.width / options.width,
+              image.height / options.height
+            );
+            options.cropWidth = ~~(options.width * scale);
+            options.cropHeight = ~~(options.height * scale);
+            // Img = 100x100, width = 95x95, scale = 100/95, 1/scale > min
+            // don't set minscale smaller than 1/scale
+            // -> don't pick crops that need upscaling
+            options.minScale = min(
+              options.maxScale,
+              max(1 / scale, options.minScale)
+            );
 
-          // prescale if possible
-          if (options.prescale !== false) {
-            prescale = min(max(256 / image.width, 256 / image.height), 1);
-            if (prescale < 1) {
-              image = iop.resample(
-                image,
-                image.width * prescale,
-                image.height * prescale
-              );
-              options.cropWidth = ~~(options.cropWidth * prescale);
-              options.cropHeight = ~~(options.cropHeight * prescale);
-              if (options.boost) {
-                options.boost = options.boost.map(function (boost) {
-                  return {
-                    x: ~~(boost.x * prescale),
-                    y: ~~(boost.y * prescale),
-                    width: ~~(boost.width * prescale),
-                    height: ~~(boost.height * prescale),
-                    weight: boost.weight,
-                  };
-                });
+            // prescale if possible
+            if (options.prescale !== false) {
+              prescale = min(max(256 / image.width, 256 / image.height), 1);
+              if (prescale < 1) {
+                image = iop.resample(
+                  image,
+                  image.width * prescale,
+                  image.height * prescale
+                );
+                options.cropWidth = ~~(options.cropWidth * prescale);
+                options.cropHeight = ~~(options.cropHeight * prescale);
+                if (options.boost) {
+                  options.boost = options.boost.map(function (boost) {
+                    return {
+                      x: ~~(boost.x * prescale),
+                      y: ~~(boost.y * prescale),
+                      width: ~~(boost.width * prescale),
+                      height: ~~(boost.height * prescale),
+                      weight: boost.weight,
+                    };
+                  });
+                }
+              } else {
+                prescale = 1;
               }
-            } else {
-              prescale = 1;
             }
           }
+          return image;
         }
-        return image;
-      })
-      .then(function (image) {
-        return iop.getData(image).then(function (data) {
-          var result = analyse(options, data);
+      )
+      .then(
+        /** @param {any} image */ function (image) {
+          return iop.getData(image).then(function (data) {
+            var result = analyse(options, data);
 
-          var crops = result.crops || [result.topCrop];
-          for (var i = 0, iLen = crops.length; i < iLen; i++) {
-            var crop = crops[i];
-            crop.x = ~~(crop.x / prescale);
-            crop.y = ~~(crop.y / prescale);
-            crop.width = ~~(crop.width / prescale);
-            crop.height = ~~(crop.height / prescale);
-          }
-          if (callback) callback(result);
-          return result;
-        });
-      });
+            var crops = result.crops || [result.topCrop];
+            for (var i = 0, iLen = crops.length; i < iLen; i++) {
+              var crop = crops[i];
+              crop.x = ~~(crop.x / prescale);
+              crop.y = ~~(crop.y / prescale);
+              crop.width = ~~(crop.width / prescale);
+              crop.height = ~~(crop.height / prescale);
+            }
+            if (callback) callback(result);
+            return result;
+          });
+        }
+      );
   };
 
   // Check if all the dependencies are there
   // todo:
+  /** @param {{ canvasFactory?: CanvasFactory }} [options] */
   smartcrop.isAvailable = function (options) {
     if (!smartcrop.Promise) return false;
 
@@ -172,6 +245,10 @@
     return true;
   };
 
+  /**
+   * @param {ImageDataLike} i
+   * @param {ImageDataLike} o
+   */
   function edgeDetect(i, o) {
     var id = i.data;
     var od = o.data;
@@ -199,6 +276,11 @@
     }
   }
 
+  /**
+   * @param {Options} options
+   * @param {ImageDataLike} i
+   * @param {ImageDataLike} o
+   */
   function skinDetect(options, i, o) {
     var id = i.data;
     var od = o.data;
@@ -225,6 +307,11 @@
     }
   }
 
+  /**
+   * @param {Options} options
+   * @param {ImageDataLike} i
+   * @param {ImageDataLike} o
+   */
   function saturationDetect(options, i, o) {
     var id = i.data;
     var od = o.data;
@@ -252,6 +339,10 @@
     }
   }
 
+  /**
+   * @param {Options} options
+   * @param {ImageDataLike} output
+   */
   function applyBoosts(options, output) {
     if (!options.boost) return;
     var od = output.data;
@@ -263,6 +354,11 @@
     }
   }
 
+  /**
+   * @param {Boost} boost
+   * @param {Options} options
+   * @param {ImageDataLike} output
+   */
   function applyBoost(boost, options, output) {
     var od = output.data;
     var w = output.width;
@@ -279,7 +375,14 @@
     }
   }
 
+  /**
+   * @param {Options} options
+   * @param {number} width
+   * @param {number} height
+   * @returns {Crop[]}
+   */
   function generateCrops(options, width, height) {
+    /** @type {Crop[]} */
     var results = [];
     var minDimension = min(width, height);
     var cropWidth = options.cropWidth || minDimension;
@@ -303,6 +406,12 @@
     return results;
   }
 
+  /**
+   * @param {Options} options
+   * @param {ImageDataLike} output
+   * @param {Crop} crop
+   * @returns {Score}
+   */
   function score(options, output, crop) {
     var result = {
       detail: 0,
@@ -343,6 +452,12 @@
     return result;
   }
 
+  /**
+   * @param {Options} options
+   * @param {Crop} crop
+   * @param {number} x
+   * @param {number} y
+   */
   function importance(options, crop, x, y) {
     if (
       crop.x > x ||
@@ -368,6 +483,12 @@
   }
   smartcrop.importance = importance;
 
+  /**
+   * @param {Options} options
+   * @param {number} r
+   * @param {number} g
+   * @param {number} b
+   */
   function skinColor(options, r, g, b) {
     var mag = sqrt(r * r + g * g + b * b);
     var rd = r / mag - options.skinColor[0];
@@ -377,9 +498,14 @@
     return 1 - d;
   }
 
+  /**
+   * @param {Options} options
+   * @param {ImageDataLike} input
+   * @returns {CropResult}
+   */
   function analyse(options, input) {
-    var result = {};
-    var output = new ImgData(input.width, input.height);
+    var result = /** @type {CropResult} */ ({});
+    var output = new ImgDataCtor(input.width, input.height);
 
     edgeDetect(input, output);
     skinDetect(options, input, output);
@@ -389,6 +515,7 @@
     var scoreOutput = downSample(output, options.scoreDownSample);
 
     var topScore = -Infinity;
+    /** @type {Crop | null} */
     var topCrop = null;
     var crops = generateCrops(options, input.width, input.height);
 
@@ -401,7 +528,8 @@
       }
     }
 
-    result.topCrop = topCrop;
+    // topCrop is only null if no crop fits, which crop() does not handle.
+    result.topCrop = /** @type {Crop} */ (topCrop);
 
     if (options.debug && topCrop) {
       result.crops = crops;
@@ -413,6 +541,12 @@
     return result;
   }
 
+  /**
+   * @this {ImageDataLike}
+   * @param {number} width
+   * @param {number} height
+   * @param {ArrayLike<number>} [data]
+   */
   function ImgData(width, height, data) {
     this.width = width;
     this.height = height;
@@ -423,13 +557,21 @@
     }
   }
   smartcrop.ImgData = ImgData;
+  // Typed alias so `new` type checks; ImgData is an ES5 constructor function.
+  /** @type {new (width: number, height: number, data?: ArrayLike<number>) => ImageDataLike} */
+  var ImgDataCtor = /** @type {any} */ (ImgData);
 
+  /**
+   * @param {ImageDataLike} input
+   * @param {number} factor
+   * @returns {ImageDataLike}
+   */
   function downSample(input, factor) {
     var idata = input.data;
     var iwidth = input.width;
     var width = Math.floor(input.width / factor);
     var height = Math.floor(input.height / factor);
-    var output = new ImgData(width, height);
+    var output = new ImgDataCtor(width, height);
     var data = output.data;
     var ifactor2 = 1 / (factor * factor);
     for (var y = 0; y < height; y++) {
@@ -469,6 +611,7 @@
   }
   smartcrop._downSample = downSample;
 
+  /** @type {CanvasFactory} */
   function defaultCanvasFactory(w, h) {
     var c = document.createElement('canvas');
     c.width = w;
@@ -476,17 +619,22 @@
     return c;
   }
 
+  /**
+   * @param {CanvasFactory} canvasFactory
+   * @returns {ImageOperations}
+   */
   function canvasImageOperations(canvasFactory) {
     return {
       // Takes imageInput as argument
       // returns an object which has at least
       // {width: n, height: n}
+      /** @param {any} image */
       open: function (image) {
         // Work around images scaled in css by drawing them onto a canvas
         var w = image.naturalWidth || image.width;
         var h = image.naturalHeight || image.height;
         var c = canvasFactory(w, h);
-        var ctx = c.getContext('2d');
+        var ctx = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d'));
         if (
           image.naturalWidth &&
           (image.naturalWidth != image.width ||
@@ -503,30 +651,38 @@
       },
       // Takes an image (as returned by open), and changes it's size by resampling
       resample: function (image, width, height) {
-        return Promise.resolve(image).then(function (image) {
-          var c = canvasFactory(~~width, ~~height);
-          var ctx = c.getContext('2d');
+        return smartcrop.Promise.resolve(image).then(
+          function (/** @type {Canvas} */ image) {
+            var c = canvasFactory(~~width, ~~height);
+            var ctx = /** @type {CanvasRenderingContext2D} */ (
+              c.getContext('2d')
+            );
 
-          ctx.drawImage(
-            image,
-            0,
-            0,
-            image.width,
-            image.height,
-            0,
-            0,
-            c.width,
-            c.height
-          );
-          return smartcrop.Promise.resolve(c);
-        });
+            ctx.drawImage(
+              /** @type {CanvasImageSource} */ (/** @type {unknown} */ (image)),
+              0,
+              0,
+              image.width,
+              image.height,
+              0,
+              0,
+              c.width,
+              c.height
+            );
+            return smartcrop.Promise.resolve(c);
+          }
+        );
       },
       getData: function (image) {
-        return Promise.resolve(image).then(function (c) {
-          var ctx = c.getContext('2d');
-          var id = ctx.getImageData(0, 0, c.width, c.height);
-          return new ImgData(c.width, c.height, id.data);
-        });
+        return smartcrop.Promise.resolve(image).then(
+          function (/** @type {Canvas} */ c) {
+            var ctx = /** @type {CanvasRenderingContext2D} */ (
+              c.getContext('2d')
+            );
+            var id = ctx.getImageData(0, 0, c.width, c.height);
+            return new ImgDataCtor(c.width, c.height, id.data);
+          }
+        );
       },
     };
   }
@@ -538,6 +694,10 @@
   var abs = Math.abs;
   var sqrt = Math.sqrt;
 
+  /**
+   * Shallow-copies the properties of the remaining arguments onto o.
+   * @type {(o: Record<string, any>, ...sources: any[]) => any}
+   */
   function extend(o) {
     for (var i = 1, iLen = arguments.length; i < iLen; i++) {
       var arg = arguments[i];
@@ -552,17 +712,32 @@
 
   // Gets value in the range of [0, 1] where 0 is the center of the pictures
   // returns weight of rule of thirds [0, 1]
+  /** @param {number} x */
   function thirds(x) {
     x = (((x - 1 / 3 + 1.0) % 2.0) * 0.5 - 0.5) * 16;
     return Math.max(1.0 - x * x, 0.0);
   }
 
+  /**
+   * @param {number} r
+   * @param {number} g
+   * @param {number} b
+   */
   function cie(r, g, b) {
     return 0.5126 * b + 0.7152 * g + 0.0722 * r;
   }
+  /**
+   * @param {ArrayLike<number>} id
+   * @param {number} p
+   */
   function sample(id, p) {
     return cie(id[p], id[p + 1], id[p + 2]);
   }
+  /**
+   * @param {number} r
+   * @param {number} g
+   * @param {number} b
+   */
   function saturation(r, g, b) {
     var maximum = max(r / 255, g / 255, b / 255);
     var minimum = min(r / 255, g / 255, b / 255);
@@ -583,7 +758,8 @@
       return smartcrop;
     });
   // Common js
-  if (typeof exports !== 'undefined') exports.smartcrop = smartcrop;
+  if (typeof exports !== 'undefined')
+    /** @type {any} */ (exports).smartcrop = smartcrop;
   else if (typeof navigator !== 'undefined')
     // Browser
     window.SmartCrop = window.smartcrop = smartcrop;
