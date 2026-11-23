@@ -59,7 +59,9 @@ for (const m of MODELS) {
   const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
   const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
   if (sha256 !== m.sha256) {
-    throw new Error(`${m.name}: sha256 ${sha256} does not match pinned ${m.sha256}`);
+    throw new Error(
+      `${m.name}: sha256 ${sha256} does not match pinned ${m.sha256}`
+    );
   }
   manifest[m.name] = {
     url: m.url,

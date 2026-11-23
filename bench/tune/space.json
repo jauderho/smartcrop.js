@@ -5,10 +5,31 @@
     "detailWeight": { "type": "float", "min": 0, "max": 5 },
     "skinWeight": { "type": "float", "min": 0, "max": 3 },
     "saturationWeight": { "type": "float", "min": 0, "max": 1 },
-    "saliencyWeight": { "type": "float", "min": 0, "max": 5, "scale": "log", "offset": 0.1, "zeroProb": 0.3 },
-    "centerWeight": { "type": "float", "min": 0, "max": 2, "scale": "log", "offset": 0.1, "zeroProb": 0.3 },
+    "saliencyWeight": {
+      "type": "float",
+      "min": 0,
+      "max": 5,
+      "scale": "log",
+      "offset": 0.1,
+      "zeroProb": 0.3
+    },
+    "centerWeight": {
+      "type": "float",
+      "min": 0,
+      "max": 2,
+      "scale": "log",
+      "offset": 0.1,
+      "zeroProb": 0.3
+    },
     "textureDamping": { "type": "float", "min": 0, "max": 2, "zeroProb": 0.3 },
-    "borderPenalty": { "type": "float", "min": 0, "max": 2, "scale": "log", "offset": 0.1, "zeroProb": 0.3 },
+    "borderPenalty": {
+      "type": "float",
+      "min": 0,
+      "max": 2,
+      "scale": "log",
+      "offset": 0.1,
+      "zeroProb": 0.3
+    },
     "edgeRadius": { "type": "float", "min": 0, "max": 0.6 },
     "edgeWeight": { "type": "float", "min": -40, "max": 0 },
     "outsideImportance": { "type": "float", "min": -1, "max": 0 },

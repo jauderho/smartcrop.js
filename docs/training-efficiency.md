@@ -11,16 +11,16 @@ Training run being profiled: `train.ts --cnn 3 --fcdb 0.5 --epochs 30 --l2 3e-3`
 (the shipped cnn head). GAICD train has 2636 images, 231,489 candidate windows;
 val 200 images, 17,345; FCDB train 1369 images (about 296k windows).
 
-| stage | measured | notes |
-|---|---|---|
-| dataset fetch | not measured (no downloads) | archives on disk: GAICD 308 MB, FCDB 321 MB, FLMS 204 MB; images 315 + 244 + 204 MB. FCDB restore pulls from Flickr, so it is the unknown. |
-| plug-in inference (faces + saliency + cnn) | 0.21 s/image wall with onnxruntime defaults, 0.58 CPU-s/image | per image: YuNet 15 ms, U2-Netp saliency 168 ms (80% of it), MobileNetV2 20 ms. Needed images: 2636 + 200 + 1369 = 4205, so about 15 min. Results are cached per image. |
-| feature dump (hand + cnn pooling, 749 columns) | gaicd-val 17k windows in 1.5 s on 8 procs | gaicd-train + fcdb-train about 1 min. Not a bottleneck, and dumps are already compact Float32 `.bin` (+ small `.json`). |
-| training | about 19-20 s/epoch before | 30 epochs: 524 s logged in `improve-cnn.txt` (3 runs in parallel); LambdaRank 894-908 s (scores every image's windows each step) |
-| selection (val SRCC + FCDB holdout each epoch) | 0.7 s/epoch | 4% of an epoch before, 7% after |
-| load + standardise 1.5 GB of dumps | about 1 s | 1.8 GB RSS per training process |
-| shrink | seconds | |
-| eval (`box-eval.ts` on the FCDB holdout, cached plug-ins) | 8 s | |
+| stage                                                     | measured                                                      | notes                                                                                                                                                                   |
+| --------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| dataset fetch                                             | not measured (no downloads)                                   | archives on disk: GAICD 308 MB, FCDB 321 MB, FLMS 204 MB; images 315 + 244 + 204 MB. FCDB restore pulls from Flickr, so it is the unknown.                              |
+| plug-in inference (faces + saliency + cnn)                | 0.21 s/image wall with onnxruntime defaults, 0.58 CPU-s/image | per image: YuNet 15 ms, U2-Netp saliency 168 ms (80% of it), MobileNetV2 20 ms. Needed images: 2636 + 200 + 1369 = 4205, so about 15 min. Results are cached per image. |
+| feature dump (hand + cnn pooling, 749 columns)            | gaicd-val 17k windows in 1.5 s on 8 procs                     | gaicd-train + fcdb-train about 1 min. Not a bottleneck, and dumps are already compact Float32 `.bin` (+ small `.json`).                                                 |
+| training                                                  | about 19-20 s/epoch before                                    | 30 epochs: 524 s logged in `improve-cnn.txt` (3 runs in parallel); LambdaRank 894-908 s (scores every image's windows each step)                                        |
+| selection (val SRCC + FCDB holdout each epoch)            | 0.7 s/epoch                                                   | 4% of an epoch before, 7% after                                                                                                                                         |
+| load + standardise 1.5 GB of dumps                        | about 1 s                                                     | 1.8 GB RSS per training process                                                                                                                                         |
+| shrink                                                    | seconds                                                       |                                                                                                                                                                         |
+| eval (`box-eval.ts` on the FCDB holdout, cached plug-ins) | 8 s                                                           |                                                                                                                                                                         |
 
 Critical path: training is 85-95% of the compute of a run. One config costs
 about 9 min, so the "many hours" came from sweeps (the `bench/out/*.sh`
@@ -36,26 +36,26 @@ forward dot products and memory bound in the layer-0 gradient accumulation.
 
 All changes keep results bit-identical or are pure additions.
 
-| change | file | effect |
-|---|---|---|
-| Forward pass computes 4 output units at once with independent accumulators (each still summed in the original order), reads layer 0 straight from the dump (no copy to a Float64 vector) | `bench/learned/train.ts` | bit-identical |
-| Backward for both rows of a pair is fused: each gradient element still receives `+= dA*xA` then `+= dB*xB` in the original order, but the buffers are touched once | `bench/learned/train.ts` | bit-identical |
-| Training time is printed (`time: train Xs, val/holdout eval Ys`) | `bench/learned/train.ts` | log only |
-| Content-addressed dump cache: `<name>.key` = SHA-256 of the feature code, plug-in code, model pins, package versions, annotations, projection and dump args; unchanged dumps are skipped (`--force` recomputes). `--outdir` relocates the output | `bench/learned/dump.ts`, `scripts/weights-fingerprint.ts` (`featureKey`) | stage skipped when unchanged |
-| `precompute.ts --shard k/n` for parallel processes; `SMARTCROP_ORT_THREADS` caps onnxruntime threads; `SMARTCROP_CACHE_DIR` relocates the plug-in cache | `bench/precompute.ts`, `plugins/onnx/runtime.ts`, `plugins/onnx/cnn.ts`, `bench/plugin-cache.ts` | 1.4x on inference |
-| Ensemble members trained as separate processes and merged (`combine.ts`) | `bench/learned/combine.ts` | K members in about the time of one |
-| `gate.ts`, `projection-from-shipped.ts`, `weights-fingerprint.ts` | new | for the workflow (section 3) |
+| change                                                                                                                                                                                                                                           | file                                                                                             | effect                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| Forward pass computes 4 output units at once with independent accumulators (each still summed in the original order), reads layer 0 straight from the dump (no copy to a Float64 vector)                                                         | `bench/learned/train.ts`                                                                         | bit-identical                      |
+| Backward for both rows of a pair is fused: each gradient element still receives `+= dA*xA` then `+= dB*xB` in the original order, but the buffers are touched once                                                                               | `bench/learned/train.ts`                                                                         | bit-identical                      |
+| Training time is printed (`time: train Xs, val/holdout eval Ys`)                                                                                                                                                                                 | `bench/learned/train.ts`                                                                         | log only                           |
+| Content-addressed dump cache: `<name>.key` = SHA-256 of the feature code, plug-in code, model pins, package versions, annotations, projection and dump args; unchanged dumps are skipped (`--force` recomputes). `--outdir` relocates the output | `bench/learned/dump.ts`, `scripts/weights-fingerprint.ts` (`featureKey`)                         | stage skipped when unchanged       |
+| `precompute.ts --shard k/n` for parallel processes; `SMARTCROP_ORT_THREADS` caps onnxruntime threads; `SMARTCROP_CACHE_DIR` relocates the plug-in cache                                                                                          | `bench/precompute.ts`, `plugins/onnx/runtime.ts`, `plugins/onnx/cnn.ts`, `bench/plugin-cache.ts` | 1.4x on inference                  |
+| Ensemble members trained as separate processes and merged (`combine.ts`)                                                                                                                                                                         | `bench/learned/combine.ts`                                                                       | K members in about the time of one |
+| `gate.ts`, `projection-from-shipped.ts`, `weights-fingerprint.ts`                                                                                                                                                                                | new                                                                                              | for the workflow (section 3)       |
 
 Measured:
 
-| stage | before | after |
-|---|---|---|
-| training epoch (cnn 3, fcdb 0.5) | about 19-20 s | about 9-11 s (about 2x; the machine was busy for part of the runs) |
-| 30-epoch run | about 9 min | about 4.5-5.5 min |
-| hand-feature model, 2 epochs | 8 s | 6 s |
-| `--lambda 0.5` epoch | about 30 s | about 15 s |
-| plug-in inference, 96 images | 20.1 s (1 proc, default threads) | 13.9 s (8 procs x 1 thread); 14.8 s (4 x 2); 55.9 s (1 x 1) |
-| ensemble of K | K x one run, sequential | about one run per 4 members (4 cores), same file |
+| stage                            | before                           | after                                                              |
+| -------------------------------- | -------------------------------- | ------------------------------------------------------------------ |
+| training epoch (cnn 3, fcdb 0.5) | about 19-20 s                    | about 9-11 s (about 2x; the machine was busy for part of the runs) |
+| 30-epoch run                     | about 9 min                      | about 4.5-5.5 min                                                  |
+| hand-feature model, 2 epochs     | 8 s                              | 6 s                                                                |
+| `--lambda 0.5` epoch             | about 30 s                       | about 15 s                                                         |
+| plug-in inference, 96 images     | 20.1 s (1 proc, default threads) | 13.9 s (8 procs x 1 thread); 14.8 s (4 x 2); 55.9 s (1 x 1)        |
+| ensemble of K                    | K x one run, sequential          | about one run per 4 members (4 cores), same file                   |
 
 Not done on purpose: eval every N epochs (changes which epoch is selected, saves
 only 7%); Float32 or SIMD kernels (not bit-identical); data-parallel SGD
@@ -64,21 +64,21 @@ has no `.key`, so it is recomputed once, about 1 min).
 
 Equivalence evidence (all on the real data, from the repo checkout):
 
-* `train.ts --cnn 3 --fcdb 0.5 --epochs 2 --l2 3e-3 --write --out X.json`:
+- `train.ts --cnn 3 --fcdb 0.5 --epochs 2 --l2 3e-3 --write --out X.json`:
   the new and the original `train.ts` (from `git show HEAD:`) produce
   byte-identical model files (`cmp`), including the note with val SRCC 0.7906,
   Acc1/5 47.0, Acc1/10 70.0 and holdout IoU 0.7700. Repeated after formatting.
-* The same for the hand-feature model (`--hidden 32,32 --epochs 2`): identical.
-* `combine.ts` of seed 1 and seed 2 runs equals `train.ts --ensemble 2` (model
+- The same for the hand-feature model (`--hidden 32,32 --epochs 2`): identical.
+- `combine.ts` of seed 1 and seed 2 runs equals `train.ts --ensemble 2` (model
   and cnn fields identical).
-* `dump.ts` into a scratch dir (8 procs) is byte-identical to the existing
+- `dump.ts` into a scratch dir (8 procs) is byte-identical to the existing
   `gaicd-val-faces+saliency+cnn.{bin,json}`; the second run is skipped by its key.
-* `projection-from-shipped.ts` writes a file identical to
+- `projection-from-shipped.ts` writes a file identical to
   `bench/out/cnn/projection.bin`.
-* `gate.ts` on the shipped model reproduces the logged metrics (val SRCC 0.8072,
+- `gate.ts` on the shipped model reproduces the logged metrics (val SRCC 0.8072,
   Acc1/5 55.0, Acc1/10 71.5, holdout IoU 0.7780) and fails on itself at margin 0;
   on `exp-ema.json` it passes (1.5857 vs 1.5852).
-* `bun check` passes (no type errors), `bun test` passes (30 tests, including the
+- `bun check` passes (no type errors), `bun test` passes (30 tests, including the
   classic golden). Changed files were formatted individually, not with a
   repo-wide `bun fmt`; `dump.ts`, `precompute.ts`, `plugins/onnx/cnn.ts`,
   `train.ts` were already unformatted at HEAD, so their diffs include whitespace.
@@ -165,24 +165,24 @@ onnxruntime-node, onnxruntime-common and @napi-rs/canvas versions from
 config (flags and seed; `"3e-3"` equals `0.003`). The weight files themselves,
 docs, tests, eval scripts, `parallel`, `gate_margin` and `force` are excluded.
 
-* Stability: run twice with the same config and also with a re-ordered, re-typed
+- Stability: run twice with the same config and also with a re-ordered, re-typed
   config: same hash. On a temp copy (`--root`): same hash for a copy; a comment
   appended to `src/cnn.ts` changes it; a change to `src/learned-cnn-weights.ts` or
   `src/entry-cjs.ts` does not; changing a config value or a pinned model sha256
   changes it.
-* Recording: `src/weights-manifest.json` (new file, not imported by the library, so
+- Recording: `src/weights-manifest.json` (new file, not imported by the library, so
   the bundle is unchanged) holds, per head (`cnn`, `hand`): fingerprint, config,
   sha256 of the weights file, timestamp and gate metrics. The workflow writes it into
   the artifact; the owner commits it with the weights. `weights-fingerprint.ts
-  --write --config '...'` records one by hand. I did not edit
+--write --config '...'` records one by hand. I did not edit
   `src/learned-weights.ts` or `src/learned-cnn-weights.ts`, and did not create a
   manifest, because I cannot know which config produced the shipped weights.
-* Check: `bun scripts/weights-fingerprint.ts --check` recomputes each head's
+- Check: `bun scripts/weights-fingerprint.ts --check` recomputes each head's
   fingerprint with the config stored in the manifest, and also checks the weights
   file hash. It fails with an explicit "STALE ... run the Train workflow" message,
   or when the manifest is missing. Exercised on a temp copy: missing manifest ->
   exit 1; recorded -> exit 0; one appended line in `bench/learned/train.ts` -> exit 1.
-* Wiring: `.github/workflows/weights-fresh.yml` (`workflow_call` and
+- Wiring: `.github/workflows/weights-fresh.yml` (`workflow_call` and
   `workflow_dispatch`) runs the check and, on failure, writes the stale message and
   links the latest successful Train runs to the job summary.
   `publish.yml` now has `weights-fresh` as a job and `publish` `needs` it; its
@@ -193,16 +193,16 @@ docs, tests, eval scripts, `parallel`, `gate_margin` and `force` are excluded.
 
 Full run, per stage (K = 1 member unless noted):
 
-| | MacBook (before) | MacBook (after) | Actions 4 vCPU (estimate) |
-|---|---|---|---|
-| fetch | unknown | unknown | unknown, 10-90 min; Flickr and Google Drive are the risk |
-| inference (4205 images) | about 15 min | about 10 min | about 15-20 min (assumes cores 1.5-2x slower) |
-| dumps | about 1-2 min | about 1-2 min | about 3-5 min |
-| train 30 epochs | about 9 min | about 5 min | about 8-15 min |
-| ensemble of 4 | about 36 min | about 6-8 min | about 12-25 min (4 cores, memory contention) |
-| gate + shrink | under 1 min | under 1 min | about 1-2 min |
-| total, K = 1 | about 25 min + fetch | about 17 min + fetch | about 0.6-1.2 h incl. fetch |
-| total, K = 4 | about 55 min + fetch | about 20 min + fetch | about 1-2.5 h |
+|                         | MacBook (before)     | MacBook (after)      | Actions 4 vCPU (estimate)                                |
+| ----------------------- | -------------------- | -------------------- | -------------------------------------------------------- |
+| fetch                   | unknown              | unknown              | unknown, 10-90 min; Flickr and Google Drive are the risk |
+| inference (4205 images) | about 15 min         | about 10 min         | about 15-20 min (assumes cores 1.5-2x slower)            |
+| dumps                   | about 1-2 min        | about 1-2 min        | about 3-5 min                                            |
+| train 30 epochs         | about 9 min          | about 5 min          | about 8-15 min                                           |
+| ensemble of 4           | about 36 min         | about 6-8 min        | about 12-25 min (4 cores, memory contention)             |
+| gate + shrink           | under 1 min          | under 1 min          | about 1-2 min                                            |
+| total, K = 1            | about 25 min + fetch | about 17 min + fetch | about 0.6-1.2 h incl. fetch                              |
+| total, K = 4            | about 55 min + fetch | about 20 min + fetch | about 1-2.5 h                                            |
 
 A config sweep: before, 3 processes at a time (about 33 min for the six-config
 `improve-cnn.sh`); after, about 17 min for the same six. The workflow runs one
@@ -239,22 +239,22 @@ Decisions:
 
 Risks:
 
-* The workflow is untested end to end. Verified: actionlint, every script on local
+- The workflow is untested end to end. Verified: actionlint, every script on local
   data, equivalence of the pieces. Not verified: the fetch on a runner (Google
   Drive quota and Flickr dead links are plausible failures; the completeness check
   fails the run if splits are short), runner timings, the cache and artifact steps.
-* Linux onnxruntime may differ numerically from macOS, so cnn features, and
+- Linux onnxruntime may differ numerically from macOS, so cnn features, and
   therefore weights, are not bit-comparable with laptop runs even at an equal
   fingerprint. The gate compares both models on the same runner features, so it
   stays fair.
-* Dump row order depends on `--procs` (4 on the runner, 8 locally by default), which
+- Dump row order depends on `--procs` (4 on the runner, 8 locally by default), which
   changes the initial shuffle order; results differ slightly between a laptop run
   and a runner run with the same seed.
-* `ensemble` above 4 runs in waves; with `parallel: 4` all four cores and about
+- `ensemble` above 4 runs in waves; with `parallel: 4` all four cores and about
   7.5 GB RAM are used, so runner memory (16 GB) is fine, disk (about 7 GB at peak
   of about 14 GB free) is fine.
-* Runs are serialised with `concurrency: train`.
-* Dataset contents can drift from the local ones (dead Flickr links); the split
+- Runs are serialised with `concurrency: train`.
+- Dataset contents can drift from the local ones (dead Flickr links); the split
   counts are checked, but not the image contents.
-* `parallel` and `gate_margin` are not in the fingerprint (they do not change the
+- `parallel` and `gate_margin` are not in the fingerprint (they do not change the
   weights); `force` replaces the cache entry only when the gate passes.

@@ -129,8 +129,8 @@ bun scripts/fetch-models.ts   # downloads both models (checksummed) into bench/m
 ```
 
 ```javascript
-import { detectFaces, faceBoosts } from "./plugins/onnx/faces";
-import { saliencyMap } from "./plugins/onnx/saliency";
+import { detectFaces, faceBoosts } from './plugins/onnx/faces';
+import { saliencyMap } from './plugins/onnx/saliency';
 
 const imageData = ctx.getImageData(0, 0, width, height); // RGBA pixels
 const faces = await detectFaces(imageData);
@@ -157,13 +157,13 @@ and its fixed PCA projection ship separately as float16
 not include them.
 
 ```javascript
-import { cnnFeatureMap } from "./plugins/onnx/cnn";
-import { LEARNED_CNN_PACKED } from "./src/learned-cnn-weights";
+import { cnnFeatureMap } from './plugins/onnx/cnn';
+import { LEARNED_CNN_PACKED } from './src/learned-cnn-weights';
 
 const result = await smartcrop.crop(canvas, {
   width: 1200,
   height: 545,
-  scorer: "learned",
+  scorer: 'learned',
   boost: faceBoosts(faces, { imageWidth: width, imageHeight: height }),
   importanceMap: await saliencyMap(imageData),
   featureMap: await cnnFeatureMap(imageData),
@@ -216,13 +216,13 @@ bun run build   # writes dist/
 ES module (`dist/smartcrop.js`):
 
 ```javascript
-import smartcrop from "./smartcrop.js";
+import smartcrop from './smartcrop.js';
 ```
 
 CommonJS (`dist/smartcrop.cjs`):
 
 ```javascript
-const smartcrop = require("./smartcrop.cjs");
+const smartcrop = require('./smartcrop.cjs');
 ```
 
 Browser, via a script tag (`dist/smartcrop.iife.js`, defines `window.smartcrop`):

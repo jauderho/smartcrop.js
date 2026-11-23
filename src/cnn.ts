@@ -81,7 +81,7 @@ const satAt = (
   w: number,
   h: number,
   out: Float64Array,
-  sign: number,
+  sign: number
 ): void => {
   x = x < 0 ? 0 : x > w ? w : x;
   y = y < 0 ? 0 : y > h ? h : y;
@@ -98,7 +98,8 @@ const satAt = (
   const w01 = (1 - fx) * fy * sign;
   const w11 = fx * fy * sign;
   for (let c = 0; c < C; c++)
-    out[c] += w00 * s[a + c] + w10 * s[b + c] + w01 * s[c0 + c] + w11 * s[d + c];
+    out[c] +=
+      w00 * s[a + c] + w10 * s[b + c] + w01 * s[c0 + c] + w11 * s[d + c];
 };
 
 // out[c] = integral of the map over the rectangle (grid units).
@@ -108,7 +109,7 @@ const rectSum = (
   y0: number,
   x1: number,
   y1: number,
-  out: Float64Array,
+  out: Float64Array
 ): void => {
   out.fill(0);
   const { width: w, height: h, channels: C } = cx.fm;
@@ -133,7 +134,7 @@ export const cnnFeatures = (
   W: number,
   H: number,
   out: Float32Array,
-  off: number,
+  off: number
 ): void => {
   const { width: gw, height: gh, channels: C } = cx.fm;
   const sx = gw / W;
@@ -151,7 +152,14 @@ export const cnnFeatures = (
   for (let j = 0; j < k; j++) {
     for (let i = 0; i < k; i++) {
       if (roiArea > 1e-9) {
-        rectSum(cx, cx0 + i * bw, cy0 + j * bh, cx0 + (i + 1) * bw, cy0 + (j + 1) * bh, tmp);
+        rectSum(
+          cx,
+          cx0 + i * bw,
+          cy0 + j * bh,
+          cx0 + (i + 1) * bw,
+          cy0 + (j + 1) * bh,
+          tmp
+        );
         for (let c = 0; c < C; c++) out[o + c] = tmp[c] / roiArea;
       } else for (let c = 0; c < C; c++) out[o + c] = cx.mean[c];
       o += C;

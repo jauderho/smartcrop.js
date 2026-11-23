@@ -24,7 +24,7 @@
         font:
           14px/1.45 system-ui,
           -apple-system,
-          "Segoe UI",
+          'Segoe UI',
           sans-serif;
         color: var(--ink);
         background: var(--bg);
@@ -223,72 +223,72 @@
     <script>
       // Display names only; the data keys stay classic / next / next+fs / ...
       const LABEL = {
-        classic: "original (2.0.5)",
-        next: "improved",
-        "next+fs": "improved + faces/saliency",
-        "next+fsc": "improved + faces/saliency/CNN",
-        "next+fscv": "improved + faces/saliency/CNN + consensus",
-        center: "center",
+        classic: 'original (2.0.5)',
+        next: 'improved',
+        'next+fs': 'improved + faces/saliency',
+        'next+fsc': 'improved + faces/saliency/CNN',
+        'next+fscv': 'improved + faces/saliency/CNN + consensus',
+        center: 'center',
       };
       // Outline colours (all >= 4.5:1 on white). Unknown methods get one of
       // EXTRA in order of first appearance.
       const COLOR = {
-        classic: "#c62828",
-        next: "#1b7f3b",
-        "next+fs": "#7b2cbf",
-        center: "#555555",
-        truth: "#1558d6",
+        classic: '#c62828',
+        next: '#1b7f3b',
+        'next+fs': '#7b2cbf',
+        center: '#555555',
+        truth: '#1558d6',
       };
-      const EXTRA = ["#b36b00", "#0b7285", "#a61e8a", "#6b4e00"];
+      const EXTRA = ['#b36b00', '#0b7285', '#a61e8a', '#6b4e00'];
       const colorOf = (m) =>
         (COLOR[m] ??= EXTRA[Object.keys(COLOR).length % EXTRA.length]);
       // smartcrop methods from the data, then center, then truth.
       const methodNames = () => {
         const present = new Set(
-          data.items.flatMap((it) => Object.keys(it.methods)),
+          data.items.flatMap((it) => Object.keys(it.methods))
         );
         return [
           ...data.presets,
           ...[...present].filter(
-            (m) => !data.presets.includes(m) && m !== "center" && m !== "truth",
+            (m) => !data.presets.includes(m) && m !== 'center' && m !== 'truth'
           ),
-          "center",
-          "truth",
+          'center',
+          'truth',
         ].filter((m) => present.has(m));
       };
       const styled = (e, m) => {
-        e.style.setProperty("--c", colorOf(m));
+        e.style.setProperty('--c', colorOf(m));
         return e;
       };
       // "truth" is hand-set site positions for strips, dataset ground truth elsewhere.
       const truthLabel = () =>
-        data && data.kind === "strips"
-          ? "site (hand-set)"
-          : "dataset ground truth";
-      const label = (m) => (m === "truth" ? truthLabel() : (LABEL[m] ?? m));
+        data && data.kind === 'strips'
+          ? 'site (hand-set)'
+          : 'dataset ground truth';
+      const label = (m) => (m === 'truth' ? truthLabel() : (LABEL[m] ?? m));
       // Overlays shown on load. The site (hand-set) overlay starts hidden
       // for strips; the dataset ground-truth overlay starts shown.
-      const DEFAULT_ON = (n) => n !== "truth" || data.kind !== "strips";
+      const DEFAULT_ON = (n) => n !== 'truth' || data.kind !== 'strips';
       const $ = (id) => document.getElementById(id);
       const params = new URLSearchParams(location.search);
       let data = null,
-        base = "classic",
-        cand = "next",
+        base = 'classic',
+        cand = 'next',
         fs = null;
 
       function iou(a, b) {
         const ix = Math.max(
           0,
-          Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x),
+          Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
         );
         const iy = Math.max(
           0,
-          Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y),
+          Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
         );
         const i = ix * iy;
         return i / (a.w * a.h + b.w * b.h - i);
       }
-      const fmt = (n, d = 1) => (n == null ? "-" : n.toFixed(d));
+      const fmt = (n, d = 1) => (n == null ? '-' : n.toFixed(d));
       const el = (tag, cls, text) => {
         const e = document.createElement(tag);
         if (cls) e.className = cls;
@@ -300,7 +300,7 @@
       // Strips have no score; their hand-set positions are not ground truth.
       function score(it, m) {
         const x = it.methods[m];
-        return data.kind === "dataset" && x ? (x.iou ?? null) : null;
+        return data.kind === 'dataset' && x ? (x.iou ?? null) : null;
       }
       function delta(it, c = cand) {
         // positive = improved beats original, null when unscored
@@ -311,15 +311,15 @@
       }
       function status(it) {
         const d = delta(it);
-        if (d == null) return "";
-        return d > 0.01 ? "improved" : d < -0.01 ? "regressed" : "";
+        if (d == null) return '';
+        return d > 0.01 ? 'improved' : d < -0.01 ? 'regressed' : '';
       }
       // Strips: Y% of improved minus Y% of original (percentage points).
       function stripDelta(it, c = cand) {
         return it.methods[c].pos - it.methods[base].pos;
       }
       function change(it, c = cand) {
-        if (data.kind === "strips") return Math.abs(stripDelta(it, c));
+        if (data.kind === 'strips') return Math.abs(stripDelta(it, c));
         return 1 - iou(it.methods[base], it.methods[c]);
       }
       function worst(it) {
@@ -328,9 +328,9 @@
       }
 
       function summarize() {
-        const t = $("summary");
-        t.textContent = "";
-        if (data.kind === "strips") {
+        const t = $('summary');
+        t.textContent = '';
+        if (data.kind === 'strips') {
           const deltas = data.items.map((it) => stripDelta(it));
           const n = deltas.length;
           const big = deltas.filter((d) => Math.abs(d) > 5).length;
@@ -338,65 +338,65 @@
             deltas.reduce((s, d) => s + Math.abs(d), 0) / Math.max(1, n);
           t.append(
             el(
-              "div",
-              "",
-              `${big} of ${n} images where ${label(cand)} differs from ${label(base)} by more than 5 percentage points. Mean absolute Δ: ${fmt(mad)} pp.`,
-            ),
+              'div',
+              '',
+              `${big} of ${n} images where ${label(cand)} differs from ${label(base)} by more than 5 percentage points. Mean absolute Δ: ${fmt(mad)} pp.`
+            )
           );
           return;
         }
-        const tb = el("table");
-        const ds = data.kind === "dataset";
-        const head = el("tr");
-        const cols = ["method", "n", ...(ds ? ["mean IoU", "IoU ≥ 0.5"] : [])];
-        cols.forEach((c) => head.append(el("th", "", c)));
+        const tb = el('table');
+        const ds = data.kind === 'dataset';
+        const head = el('tr');
+        const cols = ['method', 'n', ...(ds ? ['mean IoU', 'IoU ≥ 0.5'] : [])];
+        cols.forEach((c) => head.append(el('th', '', c)));
         tb.append(head);
-        for (const m of methodNames().filter((m) => m !== "truth")) {
-          const r = el("tr");
+        for (const m of methodNames().filter((m) => m !== 'truth')) {
+          const r = el('tr');
           const scored = data.items.filter((it) => score(it, m) != null);
           r.append(
-            el("td", "", label(m)),
-            el("td", "", String(data.items.length)),
+            el('td', '', label(m)),
+            el('td', '', String(data.items.length))
           );
           if (ds) {
             const mean =
               scored.reduce((s, it) => s + score(it, m), 0) /
               Math.max(1, scored.length);
             r.append(
-              el("td", "", fmt(mean, 3)),
+              el('td', '', fmt(mean, 3)),
               el(
-                "td",
-                "",
-                `${scored.filter((it) => score(it, m) >= 0.5).length}/${data.items.length}`,
-              ),
+                'td',
+                '',
+                `${scored.filter((it) => score(it, m) >= 0.5).length}/${data.items.length}`
+              )
             );
           }
           tb.append(r);
         }
         t.append(tb);
-        const imp = data.items.filter((it) => status(it) === "improved").length;
+        const imp = data.items.filter((it) => status(it) === 'improved').length;
         const reg = data.items.filter(
-          (it) => status(it) === "regressed",
+          (it) => status(it) === 'regressed'
         ).length;
         const p = el(
-          "div",
-          "",
-          data.kind === "examples"
+          'div',
+          '',
+          data.kind === 'examples'
             ? `${data.items.length} crops (no ground truth). Sorted by box difference between ${label(base)} and ${label(cand)}.`
-            : `${label(cand)} vs ${label(base)}: ${imp} improved, ${reg} regressed, ${data.items.length - imp - reg} unchanged (of ${data.items.length}).`,
+            : `${label(cand)} vs ${label(base)}: ${imp} improved, ${reg} regressed, ${data.items.length - imp - reg} unchanged (of ${data.items.length}).`
         );
-        p.style.marginTop = "4px";
+        p.style.marginTop = '4px';
         t.append(p);
       }
 
       function cropCanvas(img, b, text) {
         const sw = b.w * img.naturalWidth,
           sh = b.h * img.naturalHeight;
-        const c = document.createElement("canvas");
+        const c = document.createElement('canvas');
         const s = Math.min(1, 440 / Math.max(sw, sh));
         c.width = Math.max(1, Math.round(sw * s));
         c.height = Math.max(1, Math.round(sh * s));
-        c.getContext("2d").drawImage(
+        c.getContext('2d').drawImage(
           img,
           b.x * img.naturalWidth,
           b.y * img.naturalHeight,
@@ -405,40 +405,40 @@
           0,
           0,
           c.width,
-          c.height,
+          c.height
         );
-        c.setAttribute("role", "img");
-        c.setAttribute("aria-label", text);
+        c.setAttribute('role', 'img');
+        c.setAttribute('aria-label', text);
         return c;
       }
 
       function card(it) {
         const st = status(it);
-        const strips = data.kind === "strips",
-          ds = data.kind === "dataset";
-        const c = el("section", "card " + st);
+        const strips = data.kind === 'strips',
+          ds = data.kind === 'dataset';
+        const c = el('section', 'card ' + st);
         c.append(
           el(
-            "h2",
-            "",
+            'h2',
+            '',
             it.id +
-              (it.kind && it.kind !== "truth"
-                ? `  (${it.kind === "soft" ? "soft site (hand-set)" : it.kind})`
-                : ""),
-          ),
+              (it.kind && it.kind !== 'truth'
+                ? `  (${it.kind === 'soft' ? 'soft site (hand-set)' : it.kind})`
+                : '')
+          )
         );
-        const stage = el("div", "stage");
+        const stage = el('div', 'stage');
         const img = new Image();
         img.alt = it.id;
-        img.src = "../out/gallery-" + data.set + "/" + it.img;
+        img.src = '../out/gallery-' + data.set + '/' + it.img;
         stage.append(img);
         for (const [name, b] of Object.entries(it.methods)) {
           const d = styled(
             el(
-              "div",
-              "box " + name.replace(/\W/g, "_") + (b.soft ? " soft" : ""),
+              'div',
+              'box ' + name.replace(/\W/g, '_') + (b.soft ? ' soft' : '')
             ),
-            name,
+            name
           );
           d.dataset.m = name;
           d.style.cssText += `;left:${b.x * 100}%;top:${b.y * 100}%;width:${b.w * 100}%;height:${b.h * 100}%`;
@@ -446,53 +446,53 @@
           stage.append(d);
         }
         c.append(stage);
-        const crops = el("div", "crops");
+        const crops = el('div', 'crops');
         for (const m of data.presets.filter((m) => it.methods[m])) {
-          const f = styled(el("figure"), m);
-          f.append(el("figcaption", "", label(m)));
-          const slot = el("div");
+          const f = styled(el('figure'), m);
+          f.append(el('figcaption', '', label(m)));
+          const slot = el('div');
           f.append(slot);
           crops.append(f);
           const draw = () =>
             slot.replaceChildren(
-              cropCanvas(img, it.methods[m], `${label(m)} crop of ${it.id}`),
+              cropCanvas(img, it.methods[m], `${label(m)} crop of ${it.id}`)
             );
           img.complete && img.naturalWidth
             ? draw()
-            : img.addEventListener("load", draw);
+            : img.addEventListener('load', draw);
         }
         c.append(crops);
-        const nums = el("table", "nums");
-        const hd = el("tr");
+        const nums = el('table', 'nums');
+        const hd = el('tr');
         (strips
-          ? ["method", "Y%"]
-          : ["method", "box", ds ? "IoU" : ""]
-        ).forEach((h) => hd.append(el("th", "", h)));
+          ? ['method', 'Y%']
+          : ['method', 'box', ds ? 'IoU' : '']
+        ).forEach((h) => hd.append(el('th', '', h)));
         nums.append(hd);
         for (const [name, b] of Object.entries(it.methods)) {
-          const r = el("tr", name === cand ? st : "");
-          r.append(el("td", "", label(name) + (b.soft ? " (soft)" : "")));
+          const r = el('tr', name === cand ? st : '');
+          r.append(el('td', '', label(name) + (b.soft ? ' (soft)' : '')));
           r.append(
             el(
-              "td",
-              "",
+              'td',
+              '',
               strips
                 ? fmt(b.pos)
-                : `${fmt(b.x, 2)},${fmt(b.y, 2)} ${fmt(b.w, 2)}×${fmt(b.h, 2)}`,
-            ),
+                : `${fmt(b.x, 2)},${fmt(b.y, 2)} ${fmt(b.w, 2)}×${fmt(b.h, 2)}`
+            )
           );
           if (!strips) {
             const v = ds ? b.iou : null;
             r.append(
               el(
-                "td",
+                'td',
                 ds && name === cand && st
-                  ? st === "improved"
-                    ? "good"
-                    : "bad"
-                  : "",
-                v == null ? "" : fmt(v, 3),
-              ),
+                  ? st === 'improved'
+                    ? 'good'
+                    : 'bad'
+                  : '',
+                v == null ? '' : fmt(v, 3)
+              )
             );
           }
           nums.append(r);
@@ -500,10 +500,10 @@
         if (strips) {
           for (const c of data.presets.filter((p) => p !== base)) {
             const d = stripDelta(it, c);
-            const r = el("tr");
+            const r = el('tr');
             r.append(
-              el("td", "", `Δ ${label(c)} vs ${label(base)}`),
-              el("td", "", `${d > 0 ? "+" : ""}${fmt(d)} pp`),
+              el('td', '', `Δ ${label(c)} vs ${label(base)}`),
+              el('td', '', `${d > 0 ? '+' : ''}${fmt(d)} pp`)
             );
             nums.append(r);
           }
@@ -513,37 +513,37 @@
       }
 
       function render() {
-        const sort = $("sort").value,
-          filter = $("filter").value;
+        const sort = $('sort').value,
+          filter = $('filter').value;
         let items = data.items.filter(
-          (it) => filter === "all" || status(it) === filter,
+          (it) => filter === 'all' || status(it) === filter
         );
-        const key = sort.startsWith("change:")
+        const key = sort.startsWith('change:')
           ? (it) => change(it, sort.slice(7))
           : { change, worst, id: null }[sort];
         items = [...items].sort(
           key
             ? (a, b) => key(b) - key(a) || a.id.localeCompare(b.id)
-            : (a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }),
+            : (a, b) => a.id.localeCompare(b.id, undefined, { numeric: true })
         );
-        const grid = $("grid");
+        const grid = $('grid');
         grid.replaceChildren(...items.map(card));
         applyToggles();
       }
       function applyToggles() {
-        for (const b of document.querySelectorAll(".box"))
-          b.hidden = !$("t-" + b.dataset.m)?.checked;
+        for (const b of document.querySelectorAll('.box'))
+          b.hidden = !$('t-' + b.dataset.m)?.checked;
       }
 
       // Sort and Show options depend on the set: strips has no IoU-based
       // "worst" sort and no improved/regressed filter.
       function configureControls() {
-        const strips = data.kind === "strips";
-        const sort = $("sort"),
-          filter = $("filter");
+        const strips = data.kind === 'strips';
+        const sort = $('sort'),
+          filter = $('filter');
         const keep = sort.value;
         const sorts = [
-          ["change", `Biggest change ${label(base)} vs ${label(cand)}`],
+          ['change', `Biggest change ${label(base)} vs ${label(cand)}`],
         ];
         // One "biggest change vs original" sort per additional method.
         for (const p of data.presets)
@@ -552,52 +552,52 @@
               `change:${p}`,
               `Biggest change ${label(base)} vs ${label(p)}`,
             ]);
-        if (!strips) sorts.push(["worst", `Worst ${label(cand)} IoU`]);
-        sorts.push(["id", "Id"]);
-        sort.textContent = "";
+        if (!strips) sorts.push(['worst', `Worst ${label(cand)} IoU`]);
+        sorts.push(['id', 'Id']);
+        sort.textContent = '';
         for (const [v, t] of sorts) sort.append(new Option(t, v));
-        sort.value = sorts.some(([v]) => v === keep) ? keep : "change";
+        sort.value = sorts.some(([v]) => v === keep) ? keep : 'change';
         const filters = strips
-          ? [["all", "all"]]
+          ? [['all', 'all']]
           : [
-              ["all", "all"],
-              ["improved", "improved only"],
-              ["regressed", "regressed only"],
+              ['all', 'all'],
+              ['improved', 'improved only'],
+              ['regressed', 'regressed only'],
             ];
-        filter.textContent = "";
+        filter.textContent = '';
         for (const [v, t] of filters) filter.append(new Option(t, v));
-        filter.value = "all";
-        filter.closest("label").hidden = strips;
+        filter.value = 'all';
+        filter.closest('label').hidden = strips;
       }
 
       function buildToggles() {
-        const t = $("toggles");
-        t.textContent = "";
+        const t = $('toggles');
+        t.textContent = '';
         for (const n of methodNames()) {
           if (
-            n === "truth" &&
-            data.kind !== "strips" &&
-            data.kind !== "dataset"
+            n === 'truth' &&
+            data.kind !== 'strips' &&
+            data.kind !== 'dataset'
           )
             continue;
-          const l = el("label");
-          const cb = el("input");
-          cb.type = "checkbox";
+          const l = el('label');
+          const cb = el('input');
+          cb.type = 'checkbox';
           cb.checked = DEFAULT_ON(n);
-          cb.id = "t-" + n;
+          cb.id = 't-' + n;
           cb.dataset.m = n;
-          cb.addEventListener("change", applyToggles);
-          const sw = styled(el("span", "sw " + n), n);
+          cb.addEventListener('change', applyToggles);
+          const sw = styled(el('span', 'sw ' + n), n);
           l.append(cb, sw, document.createTextNode(label(n)));
           t.append(l);
         }
       }
 
       async function load(set) {
-        const msg = $("msg");
+        const msg = $('msg');
         msg.hidden = true;
-        $("grid").replaceChildren();
-        $("summary").textContent = "";
+        $('grid').replaceChildren();
+        $('summary').textContent = '';
         let res;
         try {
           res = await fetch(`../out/gallery-${set}/data.json`);
@@ -610,25 +610,25 @@
           return;
         }
         data = await res.json();
-        base = data.presets.includes("classic") ? "classic" : data.presets[0];
-        cand = data.presets.includes("next")
-          ? "next"
+        base = data.presets.includes('classic') ? 'classic' : data.presets[0];
+        cand = data.presets.includes('next')
+          ? 'next'
           : (data.presets[1] ?? base);
-        fs = data.presets.includes("next+fs") ? "next+fs" : null;
+        fs = data.presets.includes('next+fs') ? 'next+fs' : null;
         configureControls();
         buildToggles();
         summarize();
         render();
       }
 
-      $("set").value = params.get("set") || "strips";
-      $("set").addEventListener("change", () => {
-        history.replaceState(null, "", "?set=" + $("set").value);
-        load($("set").value);
+      $('set').value = params.get('set') || 'strips';
+      $('set').addEventListener('change', () => {
+        history.replaceState(null, '', '?set=' + $('set').value);
+        load($('set').value);
       });
-      $("sort").addEventListener("change", () => data && render());
-      $("filter").addEventListener("change", () => data && render());
-      load($("set").value);
+      $('sort').addEventListener('change', () => data && render());
+      $('filter').addEventListener('change', () => data && render());
+      load($('set').value);
     </script>
   </body>
 </html>

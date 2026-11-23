@@ -25,7 +25,10 @@ const all = (await Bun.file(join(dir, 'candidates.json')).json()) as {
 }[];
 const train = all.filter((a) => a.split === 'train');
 const step = train.length / nImages;
-const pick = Array.from({ length: nImages }, (_, i) => train[Math.floor(i * step)]);
+const pick = Array.from(
+  { length: nImages },
+  (_, i) => train[Math.floor(i * step)]
+);
 
 const R = RAW_CHANNELS;
 const rows: Float32Array[] = [];
@@ -40,7 +43,9 @@ for (const a of pick) {
   rows.push(m.data);
   n += m.width * m.height;
 }
-console.log(`${nImages} maps, ${n} pixels, ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+console.log(
+  `${nImages} maps, ${n} pixels, ${((performance.now() - t0) / 1000).toFixed(1)}s`
+);
 
 const mean = new Float64Array(R);
 for (const d of rows) for (let i = 0; i < d.length; i++) mean[i % R] += d[i];
@@ -67,7 +72,8 @@ const V = new Float64Array(R * R);
 for (let i = 0; i < R; i++) V[i * R + i] = 1;
 for (let sweep = 0; sweep < 30; sweep++) {
   let off = 0;
-  for (let p = 0; p < R; p++) for (let q = p + 1; q < R; q++) off += cov[p * R + q] ** 2;
+  for (let p = 0; p < R; p++)
+    for (let q = p + 1; q < R; q++) off += cov[p * R + q] ** 2;
   if (off < 1e-18) break;
   for (let p = 0; p < R; p++) {
     for (let q = p + 1; q < R; q++) {
@@ -98,7 +104,9 @@ for (let sweep = 0; sweep < 30; sweep++) {
     }
   }
 }
-const order = Array.from({ length: R }, (_, i) => i).sort((a, b) => cov[b * R + b] - cov[a * R + a]);
+const order = Array.from({ length: R }, (_, i) => i).sort(
+  (a, b) => cov[b * R + b] - cov[a * R + a]
+);
 const total = order.reduce((s, i) => s + cov[i * R + i], 0);
 let acc = 0;
 const proj = new Float32Array(R * C);
@@ -107,7 +115,9 @@ for (let c = 0; c < C; c++) {
   acc += cov[e * R + e];
   for (let k = 0; k < R; k++) proj[k * C + c] = V[k * R + e];
 }
-console.log(`top ${C} components explain ${((100 * acc) / total).toFixed(1)}% of variance`);
+console.log(
+  `top ${C} components explain ${((100 * acc) / total).toFixed(1)}% of variance`
+);
 
 // Round to float16 (what ships).
 const all16 = decodeF16(encodeF16([...mean, ...proj]));

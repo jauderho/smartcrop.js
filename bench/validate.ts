@@ -7,50 +7,50 @@
 // Usage: bun bench/validate.ts --a '{json}' [--a-with faces,saliency]
 //          --b '{json}' [--b-with ...] [--sets fcdb:test,flms:all,gaicd:test]
 //          [--label-a name] [--label-b name]
-import { join } from "node:path";
-import { loadTags, subsetsOf, SUBSETS } from "./subsets";
+import { join } from 'node:path';
+import { loadTags, subsetsOf, SUBSETS } from './subsets';
 
 const args = process.argv.slice(2);
 const take = (n: string, d?: string) => {
   const i = args.indexOf(`--${n}`);
   return i > -1 ? args[i + 1] : d;
 };
-const cfg = (k: "a" | "b") => ({
-  options: take(k, "{}")!,
-  with: take(`${k}-with`, ""),
+const cfg = (k: 'a' | 'b') => ({
+  options: take(k, '{}')!,
+  with: take(`${k}-with`, ''),
   label: take(`label-${k}`, k.toUpperCase())!,
 });
-const A = cfg("a");
-const B = cfg("b");
-const sets = take("sets", "fcdb:test,flms:all,gaicd:test")!
-  .split(",")
-  .map((s) => s.split(":"));
-const out = join(import.meta.dir, "out/validate");
+const A = cfg('a');
+const B = cfg('b');
+const sets = take('sets', 'fcdb:test,flms:all,gaicd:test')!
+  .split(',')
+  .map((s) => s.split(':'));
+const out = join(import.meta.dir, 'out/validate');
 
 type Per = { image: string; iou: number; bde: number };
 async function run(
   dataset: string,
   split: string,
   c: typeof A,
-  tag: string,
+  tag: string
 ): Promise<Per[]> {
   const file = join(out, `${dataset}-${split}-${tag}.json`);
   const cmd = [
-    "bun",
-    join(import.meta.dir, "box-eval.ts"),
-    "--dataset",
+    'bun',
+    join(import.meta.dir, 'box-eval.ts'),
+    '--dataset',
     dataset,
-    "--split",
+    '--split',
     split,
-    "--json",
-    "--options",
+    '--json',
+    '--options',
     c.options,
-    "--per-image",
+    '--per-image',
     file,
-    ...(c.with ? ["--with", c.with] : []),
+    ...(c.with ? ['--with', c.with] : []),
   ];
-  const p = Bun.spawn(cmd, { stdout: "ignore", stderr: "inherit" });
-  if ((await p.exited) !== 0) throw new Error(`failed: ${cmd.join(" ")}`);
+  const p = Bun.spawn(cmd, { stdout: 'ignore', stderr: 'inherit' });
+  if ((await p.exited) !== 0) throw new Error(`failed: ${cmd.join(' ')}`);
   return Bun.file(file).json();
 }
 
@@ -106,21 +106,21 @@ function stats(pairs: [number, number][]) {
   };
 }
 const fmt = (name: string, s: ReturnType<typeof stats>) =>
-  `| ${name} | ${s.n} | ${s.a.toFixed(4)} | ${s.b.toFixed(4)} | ${s.diff >= 0 ? "+" : ""}${s.diff.toFixed(4)} [${s.lo.toFixed(4)}, ${s.hi.toFixed(4)}] | ${s.win}/${s.tie}/${s.loss} | ${s.p < 0.001 ? "<0.001" : s.p.toFixed(3)} |`;
+  `| ${name} | ${s.n} | ${s.a.toFixed(4)} | ${s.b.toFixed(4)} | ${s.diff >= 0 ? '+' : ''}${s.diff.toFixed(4)} [${s.lo.toFixed(4)}, ${s.hi.toFixed(4)}] | ${s.win}/${s.tie}/${s.loss} | ${s.p < 0.001 ? '<0.001' : s.p.toFixed(3)} |`;
 
 const rows: string[] = [
-  `A = ${A.label}: ${A.options}${A.with ? ` with ${A.with}` : ""}`,
-  `B = ${B.label}: ${B.options}${B.with ? ` with ${B.with}` : ""}`,
-  "",
-  "| set | n | A IoU | B IoU | B - A [95% CI] | win/tie/loss | sign p |",
-  "|---|---|---|---|---|---|---|",
+  `A = ${A.label}: ${A.options}${A.with ? ` with ${A.with}` : ''}`,
+  `B = ${B.label}: ${B.options}${B.with ? ` with ${B.with}` : ''}`,
+  '',
+  '| set | n | A IoU | B IoU | B - A [95% CI] | win/tie/loss | sign p |',
+  '|---|---|---|---|---|---|---|',
 ];
 const pooled: [number, number][] = [];
 const bySubset: Record<string, [number, number][]> = {};
 for (const [dataset, split] of sets) {
   const [ra, rb] = await Promise.all([
-    run(dataset, split, A, "a"),
-    run(dataset, split, B, "b"),
+    run(dataset, split, A, 'a'),
+    run(dataset, split, B, 'b'),
   ]);
   const mb = new Map(rb.map((r) => [r.image, r.iou]));
   const pairs = ra
@@ -135,8 +135,8 @@ for (const [dataset, split] of sets) {
       (bySubset[s] ??= []).push([r.iou, mb.get(r.image)!]);
   }
 }
-rows.push(fmt("**pooled**", stats(pooled)));
+rows.push(fmt('**pooled**', stats(pooled)));
 for (const s of SUBSETS)
   if (bySubset[s]?.length)
     rows.push(fmt(`subset ${s} (fcdb+flms)`, stats(bySubset[s])));
-console.log(rows.join("\n"));
+console.log(rows.join('\n'));

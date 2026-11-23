@@ -5,7 +5,7 @@
 // feature vector computed in O(1) per map with summed-area tables, and scored
 // by a small model whose weights (LEARNED_PACKED) were trained on
 // human-rated crops (GAICD). See bench/learned/train.ts.
-import { LEARNED_PACKED } from "./learned-weights";
+import { LEARNED_PACKED } from './learned-weights';
 
 export interface Box {
   x: number;
@@ -32,13 +32,13 @@ export interface LearnedMaps {
 }
 
 export const MAP_NAMES = [
-  "detail",
-  "skin",
-  "saturation",
-  "saliency",
-  "importance",
-  "boost",
-  "gradient", // luminance gradient magnitude
+  'detail',
+  'skin',
+  'saturation',
+  'saliency',
+  'importance',
+  'boost',
+  'gradient', // luminance gradient magnitude
 ] as const;
 
 /**
@@ -46,54 +46,54 @@ export const MAP_NAMES = [
  * are 10% of the crop size. "outer" = just outside the crop edge.
  */
 export const PER_MAP_FEATURES = [
-  "recall", // mass inside / total mass
-  "lift", // mean density inside / image mean (cap 5)
-  "bandLift", // density in the inner border band (cap 5)
-  "outerFrac", // mass in the strips just outside the edges / total mass
-  "cutSum", // sum over edges of min(inner lift, outer lift): content crossing the edge
-  "cutMax", // max over edges of the same
-  "cdx", // |centroid x - crop centre| / crop width
-  "cdy",
-  "thirds", // distance of the centroid to the nearest thirds intersection (crop units)
-  "balLR", // |left - right| / (left + right) mass
-  "balTB",
-  "edgeLift", // density on the 1-cell lines along the four crop edges (cap 5)
+  'recall', // mass inside / total mass
+  'lift', // mean density inside / image mean (cap 5)
+  'bandLift', // density in the inner border band (cap 5)
+  'outerFrac', // mass in the strips just outside the edges / total mass
+  'cutSum', // sum over edges of min(inner lift, outer lift): content crossing the edge
+  'cutMax', // max over edges of the same
+  'cdx', // |centroid x - crop centre| / crop width
+  'cdy',
+  'thirds', // distance of the centroid to the nearest thirds intersection (crop units)
+  'balLR', // |left - right| / (left + right) mass
+  'balTB',
+  'edgeLift', // density on the 1-cell lines along the four crop edges (cap 5)
 ] as const;
 
 export const GLOBAL_FEATURES = [
-  "hasImportance", // presence flags
-  "hasBoost",
-  "area", // crop area / image area
-  "area2",
-  "logArea", // log(area ratio)
-  "offX", // |crop centre - image centre| / image size * 2
-  "offY",
-  "aspect", // log(crop aspect / image aspect)
-  "absAspect",
-  "touchL", // crop edge on image border
-  "touchR",
-  "touchT",
-  "touchB",
-  "horizon", // horizon confidence inside the crop
-  "horizon13", // confidence * distance of the horizon to the 1/3 line (crop units)
-  "horizon23",
-  "horizon12",
-  "horizonThirds", // confidence * distance to the nearest third line
-  "horizonIn", // horizon inside the crop
-  "faceCut", // fraction of boost-box area in boxes that are partly cut
-  "faceIn", // a boost box is mostly inside
-  "headroom", // (top of topmost box - crop top) / crop height
-  "headroomDev", // |headroom - 0.12|
-  "faceSize", // largest contained box area / crop area
+  'hasImportance', // presence flags
+  'hasBoost',
+  'area', // crop area / image area
+  'area2',
+  'logArea', // log(area ratio)
+  'offX', // |crop centre - image centre| / image size * 2
+  'offY',
+  'aspect', // log(crop aspect / image aspect)
+  'absAspect',
+  'touchL', // crop edge on image border
+  'touchR',
+  'touchT',
+  'touchB',
+  'horizon', // horizon confidence inside the crop
+  'horizon13', // confidence * distance of the horizon to the 1/3 line (crop units)
+  'horizon23',
+  'horizon12',
+  'horizonThirds', // confidence * distance to the nearest third line
+  'horizonIn', // horizon inside the crop
+  'faceCut', // fraction of boost-box area in boxes that are partly cut
+  'faceIn', // a boost box is mostly inside
+  'headroom', // (top of topmost box - crop top) / crop height
+  'headroomDev', // |headroom - 0.12|
+  'faceSize', // largest contained box area / crop area
   // Boundary simplicity (Fang et al. 2014): gradient energy in 2-cell bands
   // along each crop edge relative to the image mean (cap 5); good crops have
   // edges through simple, low-gradient regions.
-  "gradL",
-  "gradR",
-  "gradT",
-  "gradB",
-  "gradMax",
-  "gradMean",
+  'gradL',
+  'gradR',
+  'gradT',
+  'gradB',
+  'gradMax',
+  'gradMean',
 ] as const;
 
 /**
@@ -101,24 +101,24 @@ export const GLOBAL_FEATURES = [
  * importance map, boost boxes) against the crop. Margins are in crop units,
  * negative = the subject is cut by that edge (clamped to +-0.5).
  */
-export const SUBJECT_SOURCES = ["saliency", "importance", "boost"] as const;
+export const SUBJECT_SOURCES = ['saliency', 'importance', 'boost'] as const;
 export const SUBJECT_FEATURES = [
-  "inside", // fraction of the subject box area inside the crop
-  "mL",
-  "mR",
-  "mT",
-  "mB",
-  "minMargin",
-  "cx", // subject box centre relative to the crop centre (crop units)
-  "cy",
-  "size", // subject box area / crop area (cap 2)
+  'inside', // fraction of the subject box area inside the crop
+  'mL',
+  'mR',
+  'mT',
+  'mB',
+  'minMargin',
+  'cx', // subject box centre relative to the crop centre (crop units)
+  'cy',
+  'size', // subject box area / crop area (cap 2)
 ] as const;
 
 export const FEATURE_NAMES: string[] = [
   ...MAP_NAMES.flatMap((m) => PER_MAP_FEATURES.map((f) => `${m}.${f}`)),
   ...GLOBAL_FEATURES,
   ...SUBJECT_SOURCES.flatMap((m) =>
-    SUBJECT_FEATURES.map((f) => `subject.${m}.${f}`),
+    SUBJECT_FEATURES.map((f) => `subject.${m}.${f}`)
   ),
 ];
 export const FEATURE_COUNT = FEATURE_NAMES.length;
@@ -144,7 +144,7 @@ const integral = (
   grid: Float32Array,
   gw: number,
   gh: number,
-  mode: 0 | 1 | 2,
+  mode: 0 | 1 | 2
 ): Float64Array => {
   const stride = gw + 1;
   const out = new Float64Array(stride * (gh + 1));
@@ -167,7 +167,7 @@ const subjectBox = (
   g: Float32Array,
   gw: number,
   gh: number,
-  factor: number,
+  factor: number
 ): Box | null => {
   let max = 0;
   for (let i = 0; i < g.length; i++) if (g[i] > max) max = g[i];
@@ -301,7 +301,7 @@ const rect = (
   x0: number,
   y0: number,
   x1: number,
-  y1: number,
+  y1: number
 ): number =>
   x1 > x0 && y1 > y0
     ? s[y1 * stride + x1] -
@@ -326,7 +326,7 @@ export const learnedFeatures = (
   w: number,
   h: number,
   out: Float32Array,
-  off: number,
+  off: number
 ): void => {
   const { gw, gh, factor: F, stride } = c;
   const gx0 = clamp(Math.round(x / F), 0, gw - 1);
@@ -492,19 +492,19 @@ export const learnedFeatures = (
     const e = (m: number, a: number) => Math.min(5, m / Math.max(1, a) / mean);
     const gL = e(
       rect(G, stride, gx0, gy0, Math.min(gx1, gx0 + t2), gy1),
-      Math.min(t2, cw) * ch,
+      Math.min(t2, cw) * ch
     );
     const gR = e(
       rect(G, stride, Math.max(gx0, gx1 - t2), gy0, gx1, gy1),
-      Math.min(t2, cw) * ch,
+      Math.min(t2, cw) * ch
     );
     const gT = e(
       rect(G, stride, gx0, gy0, gx1, Math.min(gy1, gy0 + t2)),
-      Math.min(t2, ch) * cw,
+      Math.min(t2, ch) * cw
     );
     const gB = e(
       rect(G, stride, gx0, Math.max(gy0, gy1 - t2), gx1, gy1),
-      Math.min(t2, ch) * cw,
+      Math.min(t2, ch) * cw
     );
     out[o++] = gL;
     out[o++] = gR;
@@ -563,7 +563,7 @@ export const z = (v: number, mean: number, std: number): number =>
 export const learnedScore = (
   f: Float32Array,
   off: number,
-  model: LearnedModel = defaultModel(),
+  model: LearnedModel = defaultModel()
 ): number => {
   const { mean, std, layers } = model;
   if (layers.length === 0) return 0; // untrained
@@ -578,7 +578,7 @@ export const learnedScore = (
 
 const mlp = (
   x0: Float64Array,
-  layers: { w: number[]; b: number[] }[],
+  layers: { w: number[]; b: number[] }[]
 ): number => {
   let x = x0;
   for (let l = 0; l < layers.length; l++) {
@@ -601,7 +601,7 @@ const mlp = (
 // concatenated and base64-encoded.
 
 export interface PackedModel {
-  kind: "f32" | "f16" | "q8";
+  kind: 'f32' | 'f16' | 'q8';
   /** outputs per layer; layer 0's input is FEATURE_COUNT (or the cnn head's input width) */
   sizes: number[];
   /** number of ensemble nets (1 + members) */
@@ -634,15 +634,15 @@ const f16value = (h: number): number => {
 };
 
 const toBase64 = (bytes: Uint8Array): string => {
-  let s = "";
+  let s = '';
   for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
   return btoa(s);
 };
 // Plain decoder: the library must not depend on a global atob (it is the
 // default scorer, so it runs wherever smartcrop runs).
-const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const fromBase64 = (b64: string): Uint8Array => {
-  const s = b64.replace(/[^A-Za-z0-9+/]/g, "");
+  const s = b64.replace(/[^A-Za-z0-9+/]/g, '');
   const out = new Uint8Array(Math.floor((s.length * 3) / 4));
   let o = 0;
   for (let i = 0; i < s.length; i += 4) {
@@ -669,13 +669,14 @@ export const decodeF16 = (b64: string): Float32Array => {
   const b = fromBase64(b64);
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const out = new Float32Array(b.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = f16value(dv.getUint16(2 * i, true));
+  for (let i = 0; i < out.length; i++)
+    out[i] = f16value(dv.getUint16(2 * i, true));
   return out;
 };
 
 export const packModel = (
   model: LearnedModel,
-  kind: PackedModel["kind"],
+  kind: PackedModel['kind']
 ): PackedModel => {
   const nets = [model.layers, ...(model.members ?? [])];
   const sizes = model.layers.map((l) => l.b.length);
@@ -689,11 +690,11 @@ export const packModel = (
     for (const l of net) {
       const rows = l.b.length;
       const cols = l.w.length / rows;
-      if (kind === "f32") {
+      if (kind === 'f32') {
         const dv = new DataView(new ArrayBuffer(4 * l.w.length));
         l.w.forEach((v, i) => dv.setFloat32(4 * i, v, true));
         chunks.push(new Uint8Array(dv.buffer));
-      } else if (kind === "f16") {
+      } else if (kind === 'f16') {
         const dv = new DataView(new ArrayBuffer(2 * l.w.length));
         l.w.forEach((v, i) => dv.setUint16(2 * i, f16bits(v), true));
         chunks.push(new Uint8Array(dv.buffer));
@@ -708,7 +709,7 @@ export const packModel = (
           for (let c = 0; c < cols; c++) {
             dv.setInt8(
               4 * rows + r * cols + c,
-              Math.round(l.w[r * cols + c] / scale),
+              Math.round(l.w[r * cols + c] / scale)
             );
           }
         }
@@ -729,7 +730,7 @@ export const packModel = (
 export const unpackModel = (
   p: PackedModel,
   /** input width of layer 0 (the cnn head has more than FEATURE_COUNT) */
-  D: number = FEATURE_COUNT,
+  D: number = FEATURE_COUNT
 ): LearnedModel => {
   const bytes = fromBase64(p.data);
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -742,17 +743,17 @@ export const unpackModel = (
   const mean = f32(D);
   const std = f32(D);
   const biases = Array.from({ length: p.nets }, () =>
-    p.sizes.map((n) => f32(n)),
+    p.sizes.map((n) => f32(n))
   );
   const nets = biases.map((bs) =>
     bs.map((b, l) => {
       const rows = p.sizes[l];
       const cols = l === 0 ? D : p.sizes[l - 1];
       const w: number[] = new Array(rows * cols);
-      if (p.kind === "f32") {
+      if (p.kind === 'f32') {
         for (let i = 0; i < w.length; i++, o += 4)
           w[i] = dv.getFloat32(o, true);
-      } else if (p.kind === "f16") {
+      } else if (p.kind === 'f16') {
         for (let i = 0; i < w.length; i++, o += 2)
           w[i] = f16value(dv.getUint16(o, true));
       } else {
@@ -763,7 +764,7 @@ export const unpackModel = (
         }
       }
       return { w, b };
-    }),
+    })
   );
   return {
     mean,

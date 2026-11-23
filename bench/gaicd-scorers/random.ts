@@ -20,7 +20,7 @@ export async function scoreCandidates(
   _width: number,
   _height: number,
   candidates: [number, number, number, number][],
-  options: { seed?: number } = {},
+  options: { seed?: number } = {}
 ): Promise<number[]> {
   const next = rng(hash(imagePath) ^ (options.seed ?? 1));
   return candidates.map(() => next());

@@ -20,8 +20,8 @@
 //
 // Usage: bun bench/gaicd-eval.ts [--scorer path] [--split test|val]
 //          [--limit N] [--options '{json}'] [--json]
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
 type Entry = {
   image: string;
@@ -35,7 +35,7 @@ type Scorer = (
   width: number,
   height: number,
   candidates: [number, number, number, number][],
-  options: Record<string, unknown>,
+  options: Record<string, unknown>
 ) => Promise<number[]>;
 
 const args = process.argv.slice(2);
@@ -43,16 +43,16 @@ const opt = (n: string) => {
   const i = args.indexOf(`--${n}`);
   return i > -1 ? args[i + 1] : undefined;
 };
-const scorerPath = resolve(opt("scorer") ?? "bench/gaicd-scorers/smartcrop.ts");
-const split = opt("split") ?? "test";
-const limit = Number(opt("limit")) || Infinity;
-const options = JSON.parse(opt("options") ?? "{}") as Record<string, unknown>;
-const asJson = args.includes("--json");
-if (split !== "test" && split !== "val") {
-  throw new Error("--split must be test or val");
+const scorerPath = resolve(opt('scorer') ?? 'bench/gaicd-scorers/smartcrop.ts');
+const split = opt('split') ?? 'test';
+const limit = Number(opt('limit')) || Infinity;
+const options = JSON.parse(opt('options') ?? '{}') as Record<string, unknown>;
+const asJson = args.includes('--json');
+if (split !== 'test' && split !== 'val') {
+  throw new Error('--split must be test or val');
 }
 
-const DIR = resolve(import.meta.dir, "datasets/gaicd");
+const DIR = resolve(import.meta.dir, 'datasets/gaicd');
 
 const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 
@@ -109,7 +109,7 @@ const { scoreCandidates } = (await import(scorerPath)) as {
   scoreCandidates: Scorer;
 };
 const entries = (
-  JSON.parse(await readFile(join(DIR, "candidates.json"), "utf8")) as Entry[]
+  JSON.parse(await readFile(join(DIR, 'candidates.json'), 'utf8')) as Entry[]
 )
   .filter((e) => e.split === split)
   .slice(0, limit);
@@ -121,7 +121,7 @@ const pcc: number[] = [];
 const t0 = performance.now();
 for (const [n, e] of entries.entries()) {
   const boxes = e.candidates.map(
-    ([x, y, w, h]) => [x, y, x + w, y + h] as [number, number, number, number],
+    ([x, y, w, h]) => [x, y, x + w, y + h] as [number, number, number, number]
   );
   const mos = e.candidates.map((c) => c[4]);
   const pred = await scoreCandidates(
@@ -129,7 +129,7 @@ for (const [n, e] of entries.entries()) {
     e.width,
     e.height,
     boxes,
-    options,
+    options
   );
   if (pred.length !== mos.length || pred.some((v) => !Number.isFinite(v))) {
     throw new Error(`bad scores for ${e.image}`);
@@ -144,7 +144,7 @@ for (const [n, e] of entries.entries()) {
 
 const pct = (a: number[]) => mean(a) * 100;
 const result = {
-  scorer: scorerPath.replace(resolve(".") + "/", ""),
+  scorer: scorerPath.replace(resolve('.') + '/', ''),
   split,
   images: entries.length,
   options,
@@ -162,13 +162,13 @@ if (asJson) {
 } else {
   const f = (v: number) => v.toFixed(2);
   console.log(
-    `${result.scorer}  split=${split}  images=${result.images}  ${result.seconds.toFixed(1)}s`,
+    `${result.scorer}  split=${split}  images=${result.images}  ${result.seconds.toFixed(1)}s`
   );
   console.log(`SRCC ${result.srcc.toFixed(4)}  PCC ${result.pcc.toFixed(4)}`);
   console.log(
-    `Acc5   ${result.acc5.map(f).join("  ")}  mean ${f(result.acc5Mean)}   (k=1..4 of best 5)`,
+    `Acc5   ${result.acc5.map(f).join('  ')}  mean ${f(result.acc5Mean)}   (k=1..4 of best 5)`
   );
   console.log(
-    `Acc10  ${result.acc10.map(f).join("  ")}  mean ${f(result.acc10Mean)}   (k=1..4 of best 10)`,
+    `Acc10  ${result.acc10.map(f).join('  ')}  mean ${f(result.acc10Mean)}   (k=1..4 of best 10)`
   );
 }

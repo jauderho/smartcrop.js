@@ -19,44 +19,44 @@
 //
 // Never touched: bench/private (hand-made labels for private photos), source,
 // and anything outside bench/ and dist/.
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
-const root = join(import.meta.dir, "..");
+const root = join(import.meta.dir, '..');
 const args = process.argv.slice(2);
-const yes = args.includes("--yes");
-const results = args.includes("--results");
-const li = args.indexOf("--level");
-const level = li > -1 ? args[li + 1] : "light";
-if (!["light", "datasets", "full"].includes(level)) {
-  console.error("--level must be light, datasets or full");
+const yes = args.includes('--yes');
+const results = args.includes('--results');
+const li = args.indexOf('--level');
+const level = li > -1 ? args[li + 1] : 'light';
+if (!['light', 'datasets', 'full'].includes(level)) {
+  console.error('--level must be light, datasets or full');
   process.exit(2);
 }
 
 const p = (...s: string[]) => join(root, ...s);
 const targets: [string, string][] = [
-  [p("bench/out/cache"), "ONNX plug-in caches (faces, saliency)"],
-  [p("bench/out/learned"), "learned-scorer feature caches"],
-  [p("bench/out/plugin-check"), "plug-in debug images"],
-  [p("dist"), "build output (bun run build)"],
+  [p('bench/out/cache'), 'ONNX plug-in caches (faces, saliency)'],
+  [p('bench/out/learned'), 'learned-scorer feature caches'],
+  [p('bench/out/plugin-check'), 'plug-in debug images'],
+  [p('dist'), 'build output (bun run build)'],
 ];
-if (level !== "light") {
-  for (const d of ["fcdb", "flms", "gaicd"]) {
-    targets.push([p("bench/datasets", d), `extracted ${d.toUpperCase()}`]);
+if (level !== 'light') {
+  for (const d of ['fcdb', 'flms', 'gaicd']) {
+    targets.push([p('bench/datasets', d), `extracted ${d.toUpperCase()}`]);
   }
 }
-if (level === "full") {
+if (level === 'full') {
   targets.push(
-    [p("bench/datasets/_dl"), "downloaded dataset archives"],
-    [p("bench/models"), "downloaded model weights"],
+    [p('bench/datasets/_dl'), 'downloaded dataset archives'],
+    [p('bench/models'), 'downloaded model weights']
   );
 }
 if (results) {
-  for (const name of existsSync(p("bench/out"))
-    ? readdirSync(p("bench/out"))
+  for (const name of existsSync(p('bench/out'))
+    ? readdirSync(p('bench/out'))
     : []) {
-    const full = p("bench/out", name);
-    if (!targets.some(([t]) => t === full)) targets.push([full, "results"]);
+    const full = p('bench/out', name);
+    if (!targets.some(([t]) => t === full)) targets.push([full, 'results']);
   }
 }
 
@@ -70,15 +70,15 @@ const fmt = (b: number) =>
   b > 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`;
 
 // Don't pull data out from under a running benchmark or tuning job.
-const busy = Bun.spawnSync(["pgrep", "-fl", "bench/|fetch-(datasets|models)"])
+const busy = Bun.spawnSync(['pgrep', '-fl', 'bench/|fetch-(datasets|models)'])
   .stdout.toString()
-  .split("\n")
-  .filter((l) => /^\d+ bun /.test(l) && !l.includes("scripts/clean.ts"))
+  .split('\n')
+  .filter((l) => /^\d+ bun /.test(l) && !l.includes('scripts/clean.ts'))
   .map((l) => l.slice(0, 120));
 if (busy.length) {
-  console.error(`Benchmark jobs are running:\n  ${busy.join("\n  ")}`);
+  console.error(`Benchmark jobs are running:\n  ${busy.join('\n  ')}`);
   if (yes) {
-    console.error("Not removing anything; stop them first.");
+    console.error('Not removing anything; stop them first.');
     process.exit(1);
   }
 }
@@ -86,12 +86,12 @@ if (busy.length) {
 let total = 0;
 for (const [path, what] of targets) {
   if (!existsSync(path)) continue;
-  if (path.startsWith(p("bench/private"))) continue;
+  if (path.startsWith(p('bench/private'))) continue;
   const b = size(path);
   total += b;
   console.log(`${fmt(b).padStart(10)}  ${relative(root, path)}  (${what})`);
   if (yes) rmSync(path, { recursive: true, force: true });
 }
 console.log(
-  `${fmt(total).padStart(10)}  total ${yes ? "removed" : "would be removed — re-run with --yes"} (level ${level}${results ? ", with results" : ""})`,
+  `${fmt(total).padStart(10)}  total ${yes ? 'removed' : 'would be removed — re-run with --yes'} (level ${level}${results ? ', with results' : ''})`
 );

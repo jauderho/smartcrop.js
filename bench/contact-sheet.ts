@@ -19,14 +19,27 @@ const dir = args[0];
 const prefix = flag('out', join(dir, 'sheet'))!;
 
 type Box = { x: number; y: number; w: number; h: number };
-type Item = { id: string; img: string; w: number; h: number; methods: Record<string, Box> };
-const data = (await Bun.file(join(dir, 'data.json')).json()) as { items: Item[] };
+type Item = {
+  id: string;
+  img: string;
+  w: number;
+  h: number;
+  methods: Record<string, Box>;
+};
+const data = (await Bun.file(join(dir, 'data.json')).json()) as {
+  items: Item[];
+};
 let items = data.items.filter((it) => methods.every((m) => it.methods[m]));
 const diff = (a: Box, b: Box) =>
-  Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.w - b.w) + Math.abs(a.h - b.h);
+  Math.abs(a.x - b.x) +
+  Math.abs(a.y - b.y) +
+  Math.abs(a.w - b.w) +
+  Math.abs(a.h - b.h);
 if (sort === 'change') {
   items = items.sort(
-    (p, q) => diff(q.methods[methods[0]], q.methods[methods[1]]) - diff(p.methods[methods[0]], p.methods[methods[1]])
+    (p, q) =>
+      diff(q.methods[methods[0]], q.methods[methods[1]]) -
+      diff(p.methods[methods[0]], p.methods[methods[1]])
   );
 }
 
@@ -54,16 +67,34 @@ for (let pg = 0; pg < pages; pg++) {
       const b = it.methods[m];
       ctx.strokeStyle = colors[i % colors.length];
       ctx.lineWidth = 2;
-      ctx.strokeRect(4 + b.x * img.width * s, y0 + 4 + b.y * img.height * s, b.w * img.width * s, b.h * img.height * s);
+      ctx.strokeRect(
+        4 + b.x * img.width * s,
+        y0 + 4 + b.y * img.height * s,
+        b.w * img.width * s,
+        b.h * img.height * s
+      );
     });
     ctx.fillStyle = '#000';
     ctx.fillText(it.id.slice(0, 26), 4, y0 + CELL - 4);
     // each crop
     methods.forEach((m, i) => {
       const b = it.methods[m];
-      const sx = b.x * img.width, sy = b.y * img.height, sw = b.w * img.width, sh = b.h * img.height;
+      const sx = b.x * img.width,
+        sy = b.y * img.height,
+        sw = b.w * img.width,
+        sh = b.h * img.height;
       const k = Math.min((CELL - 8) / sw, (CELL - 8) / sh);
-      ctx.drawImage(img, sx, sy, sw, sh, (i + 1) * CELL + 4, y0 + 4, sw * k, sh * k);
+      ctx.drawImage(
+        img,
+        sx,
+        sy,
+        sw,
+        sh,
+        (i + 1) * CELL + 4,
+        y0 + 4,
+        sw * k,
+        sh * k
+      );
     });
   }
   const out = `${prefix}-${pg + 1}.jpg`;

@@ -16,9 +16,9 @@
 //
 // Options: { prescale?: boolean (default true), ...smartcrop option overrides
 // such as luminance: 'rec709', detailWeight, skinWeight, ... }
-import { createCanvas, loadImage } from "@napi-rs/canvas";
-import smartcrop from "../../src/smartcrop";
-import type { Crop, ImgDataLike, Options } from "../../src/smartcrop";
+import { createCanvas, loadImage } from '@napi-rs/canvas';
+import smartcrop from '../../src/smartcrop';
+import type { Crop, ImgDataLike, Options } from '../../src/smartcrop';
 
 type Luma = (r: number, g: number, b: number) => number;
 const cie: Luma = (r, g, b) => 0.5126 * b + 0.7152 * g + 0.0722 * r;
@@ -34,7 +34,7 @@ const saturation = (r: number, g: number, b: number) => {
 };
 
 function maps(o: Options, input: ImgDataLike): ImgDataLike {
-  const luma = o.luminance === "rec709" ? rec709 : cie;
+  const luma = o.luminance === 'rec709' ? rec709 : cie;
   const { width: w, height: h, data: id } = input;
   const out = new smartcrop.ImgData(w, h);
   const od = out.data;
@@ -101,21 +101,21 @@ export async function scoreCandidates(
   width: number,
   height: number,
   candidates: [number, number, number, number][],
-  options: Record<string, unknown> = {},
+  options: Record<string, unknown> = {}
 ): Promise<number[]> {
   const { prescale: doPrescale = true, ...overrides } = options;
   const o: Options = { ...smartcrop.DEFAULTS, ...overrides };
   const img = await loadImage(imagePath);
   if (img.width !== width || img.height !== height) {
     throw new Error(
-      `${imagePath}: ${img.width}x${img.height} != annotation ${width}x${height}`,
+      `${imagePath}: ${img.width}x${img.height} != annotation ${width}x${height}`
     );
   }
   const k = doPrescale ? Math.min(Math.max(256 / width, 256 / height), 1) : 1;
   const w = k < 1 ? ~~(width * k) : width;
   const h = k < 1 ? ~~(height * k) : height;
   const canvas = createCanvas(w, h);
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, width, height, 0, 0, w, h);
   const id = ctx.getImageData(0, 0, w, h);
   const input = new smartcrop.ImgData(w, h, id.data);
@@ -126,6 +126,6 @@ export async function scoreCandidates(
       y: y1 * k,
       width: (x2 - x1) * k,
       height: (y2 - y1) * k,
-    }),
+    })
   );
 }

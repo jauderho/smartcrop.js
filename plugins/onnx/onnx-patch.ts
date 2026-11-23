@@ -116,7 +116,10 @@ const symbolicShape = (shape: Uint8Array, names: (string | null)[]) =>
  * intermediate tensors added as outputs (type info is left for the runtime to
  * infer).
  */
-export function patchOnnx(model: Uint8Array, extraOutputs: string[]): Uint8Array {
+export function patchOnnx(
+  model: Uint8Array,
+  extraOutputs: string[]
+): Uint8Array {
   // ModelProto.graph = 7; GraphProto.input = 11, output = 12;
   // ValueInfoProto.type = 2; TypeProto.tensor_type = 1; Tensor.shape = 2.
   return rewrite(model, 0, model.length, (f, graph) => {
@@ -133,7 +136,9 @@ export function patchOnnx(model: Uint8Array, extraOutputs: string[]): Uint8Array
           return rewrite(type, 0, type.length, (tf, tensor) => {
             if (tf !== 1) return null;
             return rewrite(tensor, 0, tensor.length, (sf, shape) =>
-              sf === 2 ? symbolicShape(shape, [null, null, 'height', 'width']) : null
+              sf === 2
+                ? symbolicShape(shape, [null, null, 'height', 'width'])
+                : null
             );
           });
         });

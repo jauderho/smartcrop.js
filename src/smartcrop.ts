@@ -848,7 +848,9 @@ const learnedMaps = (
         const yb = Math.min(ih - 1, y + 1);
         for (let u = 0; u < factor; u++) {
           const x = gx * factor + u;
-          const dx = full[y * iw + Math.min(iw - 1, x + 1)] - full[y * iw + Math.max(0, x - 1)];
+          const dx =
+            full[y * iw + Math.min(iw - 1, x + 1)] -
+            full[y * iw + Math.max(0, x - 1)];
           const dy = full[yb * iw + x] - full[ya * iw + x];
           sum += Math.sqrt(dx * dx + dy * dy);
         }
@@ -1046,7 +1048,11 @@ const consensusCrop = (crops: Crop[], temperature: number, top: Crop): Crop => {
     .sort((a, b) => t[b] - t[a])
     .slice(0, CONSENSUS_TOP);
   const tmax = t[best[0]];
-  let wsum = 0, x = 0, y = 0, w = 0, h = 0;
+  let wsum = 0,
+    x = 0,
+    y = 0,
+    w = 0,
+    h = 0;
   for (const i of best) {
     const wt = Math.exp((t[i] - tmax) / (temperature * sd));
     const c = crops[i];
@@ -1056,7 +1062,13 @@ const consensusCrop = (crops: Crop[], temperature: number, top: Crop): Crop => {
     w += wt * c.width;
     h += wt * c.height;
   }
-  return { x: x / wsum, y: y / wsum, width: w / wsum, height: h / wsum, score: top.score };
+  return {
+    x: x / wsum,
+    y: y / wsum,
+    width: w / wsum,
+    height: h / wsum,
+    score: top.score,
+  };
 };
 
 const analyseLearned = (
@@ -1078,7 +1090,9 @@ const analyseLearned = (
         input.height
       );
   // Optional deep features: appended after the hand features.
-  const cnnK = options.featureMap ? (options.cnnModel?.k ?? options.cnnK ?? 0) : 0;
+  const cnnK = options.featureMap
+    ? (options.cnnModel?.k ?? options.cnnK ?? 0)
+    : 0;
   const cx = cnnK ? cnnContext(options.featureMap!) : null;
   const stride =
     FEATURE_COUNT + (cx ? cnnDim(cnnK, options.featureMap!.channels) : 0);
@@ -1117,7 +1131,9 @@ const analyseLearned = (
     const scoreOutput = downSample(output, options.scoreDownSample);
     const extras = classicExtras(options, input, scoreOutput);
     const zl = standardize(crops.map((c) => c.score!.total));
-    const zc = standardize(crops.map((c) => score(options, scoreOutput, c, extras).total));
+    const zc = standardize(
+      crops.map((c) => score(options, scoreOutput, c, extras).total)
+    );
     topScore = -Infinity;
     crops.forEach((c, i) => {
       c.score!.total = zl[i] + options.classicBlend * zc[i];
@@ -1128,9 +1144,21 @@ const analyseLearned = (
     });
   }
   if (options.contentFloor > 0) {
-    topCrop = applyContentFloor(options, ctx.boosts.length > 0, ctx.sums[4] !== null, feats, stride, crops);
+    topCrop = applyContentFloor(
+      options,
+      ctx.boosts.length > 0,
+      ctx.sums[4] !== null,
+      feats,
+      stride,
+      crops
+    );
   }
-  if (options.consensus > 0 && !options.candidates && crops.length > 1 && topCrop) {
+  if (
+    options.consensus > 0 &&
+    !options.candidates &&
+    crops.length > 1 &&
+    topCrop
+  ) {
     topCrop = consensusCrop(crops, options.consensus, topCrop);
   }
   result.topCrop = topCrop as Crop;

@@ -19,9 +19,9 @@
 // model.json is {note, model} as written by train.ts --write (default:
 // bench/out/learned/models/latest.json). --top-tol allows that fraction of
 // images to change their top choice (0 = identical).
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import {
   encodeF16,
   learnedScore,
@@ -29,24 +29,24 @@ import {
   unpackModel,
   type LearnedModel,
   type PackedModel,
-} from "../../src/learned";
-import type { PackedCnn } from "../../src/cnn";
-import { PROJECTION_FILE } from "../plugin-cache";
+} from '../../src/learned';
+import type { PackedCnn } from '../../src/cnn';
+import { PROJECTION_FILE } from '../plugin-cache';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d?: string) => {
   const i = args.indexOf(`--${n}`);
   return i > -1 ? args.splice(i, 2)[1] : d;
 };
-const dryRun = args.includes("--dry-run");
-if (dryRun) args.splice(args.indexOf("--dry-run"), 1);
-const srccTol = Number(opt("srcc-tol", "0.001"));
-const topTol = Number(opt("top-tol", "0"));
-const OUT = resolve(import.meta.dir, "../out/learned");
-const outOpt = opt("out");
-const modelPath = args[0] ?? resolve(OUT, "models/latest.json");
+const dryRun = args.includes('--dry-run');
+if (dryRun) args.splice(args.indexOf('--dry-run'), 1);
+const srccTol = Number(opt('srcc-tol', '0.001'));
+const topTol = Number(opt('top-tol', '0'));
+const OUT = resolve(import.meta.dir, '../out/learned');
+const outOpt = opt('out');
+const modelPath = args[0] ?? resolve(OUT, 'models/latest.json');
 
-const { note, model, cnn } = JSON.parse(await readFile(modelPath, "utf8")) as {
+const { note, model, cnn } = JSON.parse(await readFile(modelPath, 'utf8')) as {
   note: string;
   model: LearnedModel;
   cnn?: { k: number; channels: number };
@@ -55,7 +55,7 @@ const outPath =
   outOpt ??
   resolve(
     import.meta.dir,
-    cnn ? "../../src/learned-cnn-weights.ts" : "../../src/learned-weights.ts",
+    cnn ? '../../src/learned-cnn-weights.ts' : '../../src/learned-weights.ts'
   );
 
 type DataSet = {
@@ -65,11 +65,11 @@ type DataSet = {
 };
 const load = async (name: string, holdout = false): Promise<DataSet | null> => {
   if (!existsSync(`${OUT}/${name}.bin`)) return null;
-  const m = JSON.parse(await readFile(`${OUT}/${name}.json`, "utf8"));
+  const m = JSON.parse(await readFile(`${OUT}/${name}.json`, 'utf8'));
   const X = new Float32Array(
-    await Bun.file(`${OUT}/${name}.bin`).arrayBuffer(),
+    await Bun.file(`${OUT}/${name}.bin`).arrayBuffer()
   );
-  const imgs = m.images as DataSet["imgs"];
+  const imgs = m.images as DataSet['imgs'];
   return {
     D: m.D,
     X,
@@ -78,8 +78,8 @@ const load = async (name: string, holdout = false): Promise<DataSet | null> => {
 };
 const checks: [string, DataSet][] = [];
 const variants = cnn
-  ? [`-faces+saliency+cnn${cnn.k === 3 ? "" : cnn.k}`]
-  : ["", "-saliency", "-faces+saliency"];
+  ? [`-faces+saliency+cnn${cnn.k === 3 ? '' : cnn.k}`]
+  : ['', '-saliency', '-faces+saliency'];
 for (const v of variants) {
   const g = await load(`gaicd-val${v}`);
   if (g) checks.push([`gaicd-val${v}`, g]);
@@ -88,7 +88,7 @@ for (const v of variants) {
 }
 if (!checks.length) {
   console.error(
-    "no cached features in bench/out/learned; run bench/learned/dump.ts first",
+    'no cached features in bench/out/learned; run bench/learned/dump.ts first'
   );
   process.exit(1);
 }
@@ -119,7 +119,7 @@ const pearson = (x: number[], y: number[]) => {
   return sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
 };
 const run = (m: LearnedModel, ds: DataSet) => {
-  if (m.mean.length !== ds.D) throw new Error("model/feature width mismatch");
+  if (m.mean.length !== ds.D) throw new Error('model/feature width mismatch');
   let srcc = 0;
   const top: number[] = [];
   for (const im of ds.imgs) {
@@ -136,7 +136,7 @@ const run = (m: LearnedModel, ds: DataSet) => {
 
 const base = checks.map(([, ds]) => run(model, ds));
 let chosen: PackedModel | null = null;
-for (const kind of ["q8", "f16", "f32"] as const) {
+for (const kind of ['q8', 'f16', 'f32'] as const) {
   const packed = packModel(model, kind);
   const m = unpackModel(packed, model.mean.length);
   let ok = true;
@@ -149,13 +149,13 @@ for (const kind of ["q8", "f16", "f32"] as const) {
     const pass = changed <= topTol && Math.abs(dSrcc) <= srccTol;
     ok &&= pass;
     rows.push(
-      `  ${name.padEnd(26)} top changed ${(100 * changed).toFixed(2)}%  srcc ${r.srcc.toFixed(4)} (${dSrcc >= 0 ? "+" : ""}${dSrcc.toFixed(4)}) ${pass ? "ok" : "FAIL"}`,
+      `  ${name.padEnd(26)} top changed ${(100 * changed).toFixed(2)}%  srcc ${r.srcc.toFixed(4)} (${dSrcc >= 0 ? '+' : ''}${dSrcc.toFixed(4)}) ${pass ? 'ok' : 'FAIL'}`
     );
   });
   console.log(
-    `${kind}: ${JSON.stringify(packed).length} bytes ${ok ? "lossless" : "lossy"}`,
+    `${kind}: ${JSON.stringify(packed).length} bytes ${ok ? 'lossless' : 'lossy'}`
   );
-  console.log(rows.join("\n"));
+  console.log(rows.join('\n'));
   if (ok) {
     chosen = packed;
     break;
@@ -163,14 +163,14 @@ for (const kind of ["q8", "f16", "f32"] as const) {
 }
 if (!chosen)
   throw new Error(
-    "no encoding passed (f32 should always pass; check the inputs)",
+    'no encoding passed (f32 should always pass; check the inputs)'
   );
 
-let projection = "";
+let projection = '';
 if (cnn) {
   const buf = await Bun.file(PROJECTION_FILE).arrayBuffer();
   if (new Uint32Array(buf, 0, 1)[0] !== cnn.channels)
-    throw new Error("projection channels differ from the model");
+    throw new Error('projection channels differ from the model');
   projection = encodeF16(new Float32Array(buf, 4)); // already float16-exact
 }
 const packedCnn: PackedCnn | null = cnn
@@ -203,7 +203,7 @@ export const LEARNED_PACKED: PackedModel = ${JSON.stringify(chosen)};
 `;
 if (dryRun) {
   console.log(
-    `dry run: would write ${outPath} (${src.length} bytes, ${chosen.kind})`,
+    `dry run: would write ${outPath} (${src.length} bytes, ${chosen.kind})`
   );
 } else {
   await Bun.write(outPath, src);

@@ -4,7 +4,7 @@ export async function scoreCandidates(
   _imagePath: string,
   width: number,
   height: number,
-  candidates: [number, number, number, number][],
+  candidates: [number, number, number, number][]
 ): Promise<number[]> {
   const diag = Math.hypot(width, height);
   return candidates.map(([x1, y1, x2, y2]) => {
