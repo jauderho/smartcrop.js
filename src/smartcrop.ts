@@ -24,6 +24,16 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+import {
+  FEATURE_COUNT,
+  featureIndex,
+  learnedContext,
+  learnedFeatures,
+  learnedScore,
+  defaultModel,
+  type LearnedMaps,
+} from './learned';
+
 export interface CropBoost {
   x: number;
   y: number;
@@ -32,11 +42,26 @@ export interface CropBoost {
   weight: number;
 }
 
+export interface CropBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface CropScore {
   detail: number;
   saturation: number;
   skin: number;
   boost: number;
+  /** Colour-contrast saliency (only when saliencyWeight > 0). */
+  saliency?: number;
+  /** Closeness of the crop centre to the image centre, 0–1 (only when centerWeight > 0). */
+  center?: number;
+  /** Mean importance along crop edges inside the image, 0–1 (only when borderPenalty > 0). */
+  border?: number;
+  /** Importance-map sum (only when an importanceMap is used). */
+  map?: number;
   total: number;
 }
 
@@ -64,6 +89,17 @@ export interface Context2DLike {
     sw: number,
     sh: number
   ): { data: Uint8ClampedArray };
+}
+
+/**
+ * A per-pixel importance map, e.g. from a saliency or segmentation model, in
+ * the coordinate space of the input image (any resolution; it is resampled).
+ * Values are 0–1 (Float32Array) or 0–255 (Uint8Array / Uint8ClampedArray).
+ */
+export interface ImportanceMap {
+  width: number;
+  height: number;
+  data: Float32Array | Uint8Array | Uint8ClampedArray;
 }
 
 export interface CanvasLike {
@@ -120,18 +156,77 @@ export interface Options {
   imageOperations: ImageOperations | null;
   canvasFactory: CanvasFactory;
   debug: boolean;
+  /**
+   * Luminance weights. 'classic' keeps the historical coefficients (which
+   * over-weight blue, see upstream #77); 'rec709' uses the standard ones.
+   */
+  luminance: 'classic' | 'rec709';
+  /** Weight of the colour-contrast saliency channel (frequency-tuned, Achanta 2009). 0 = off. */
+  saliencyWeight: number;
+  /** Weight of a prior favouring crops near the image centre. 0 = off. */
+  centerWeight: number;
+  /**
+   * Subtract this fraction of the local average detail from each cell, so
+   * evenly textured areas (foliage, gravel, water) stop outscoring subjects.
+   * 0 = off.
+   */
+  textureDamping: number;
+  /** Penalty for crop edges that cut through important content. 0 = off. */
+  borderPenalty: number;
+  /** Weight of `importanceMap`. 0 = off. */
+  importanceMapWeight: number;
+  /** External importance map (saliency / subject mask), see ImportanceMap. */
+  importanceMap?: ImportanceMap;
   boost?: CropBoost[];
   input?: unknown;
+  /**
+   * Crop scoring model. 'classic' is the hand-tuned heuristic. 'learned' is a
+   * small model trained on human-rated crops (GAICD) over composition
+   * features (see src/learned.ts); it ignores the classic weights above but
+   * uses the importanceMap and boost boxes when given.
+   */
+  scorer: 'classic' | 'learned';
+  /**
+   * Learned scorer only: crops that keep less than this fraction of the
+   * salient mass (importance map if given, else mean of colour-contrast
+   * saliency and detail), or that cut a boost box (e.g. a face), are ranked
+   * below all crops that don't. If none passes the crop with the most
+   * retained mass wins. 0 = off.
+   */
+  contentFloor: number;
+  /**
+   * Learned scorer only: add this multiple of the classic score (computed
+   * with the classic weights in these options) to the learned score, both
+   * standardised over the image's candidates. 0 = learned only.
+   */
+  classicBlend: number;
+  /**
+   * Score exactly these crops (input-image coordinates) instead of generating
+   * windows. result.crops then holds one scored crop per candidate, in order.
+   */
+  candidates?: CropBox[];
+  /** @internal Return the learned feature vectors (n * FEATURE_COUNT) as result.features. */
+  emitFeatures?: boolean;
 }
 
 export type CropOptions = Partial<Options>;
 
+/** Where a crop sits in the image, as CSS object-position percentages. */
+export interface CropPosition {
+  x: number;
+  y: number;
+}
+
 export interface CropResult {
   topCrop: Crop;
+  /** topCrop as CSS object-position percentages (50 when there is no slack). */
+  position?: CropPosition;
   crops?: Crop[];
   debugOutput?: ImgDataLike;
   debugOptions?: Options;
   debugTopCrop?: Crop;
+  /** @internal learned feature vectors, see Options.emitFeatures. */
+  features?: Float32Array;
 }
 
 export class ImgData implements ImgDataLike {
@@ -164,11 +259,15 @@ const thirds = (x: number): number => {
   return Math.max(1.0 - x * x, 0.0);
 };
 
-const cie = (r: number, g: number, b: number): number =>
-  0.5126 * b + 0.7152 * g + 0.0722 * r;
+type Luma = (r: number, g: number, b: number) => number;
 
-const sample = (id: ArrayLike<number>, p: number): number =>
-  cie(id[p], id[p + 1], id[p + 2]);
+const cie: Luma = (r, g, b) => 0.5126 * b + 0.7152 * g + 0.0722 * r;
+const rec709: Luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+const lumaFor = (options: Options): Luma =>
+  options.luminance === 'rec709' ? rec709 : cie;
+
+const sample = (id: ArrayLike<number>, p: number, luma: Luma): number =>
+  luma(id[p], id[p + 1], id[p + 2]);
 
 const saturation = (r: number, g: number, b: number): number => {
   const maximum = Math.max(r / 255, g / 255, b / 255);
@@ -184,7 +283,7 @@ const saturation = (r: number, g: number, b: number): number => {
   return l > 0.5 ? d / (2 - maximum - minimum) : d / (maximum + minimum);
 };
 
-const edgeDetect = (i: ImgDataLike, o: ImgDataLike): void => {
+const edgeDetect = (i: ImgDataLike, o: ImgDataLike, luma: Luma): void => {
   const id = i.data;
   const od = o.data;
   const w = i.width;
@@ -196,14 +295,14 @@ const edgeDetect = (i: ImgDataLike, o: ImgDataLike): void => {
       let lightness;
 
       if (x === 0 || x >= w - 1 || y === 0 || y >= h - 1) {
-        lightness = sample(id, p);
+        lightness = sample(id, p, luma);
       } else {
         lightness =
-          sample(id, p) * 4 -
-          sample(id, p - w * 4) -
-          sample(id, p - 4) -
-          sample(id, p + 4) -
-          sample(id, p + w * 4);
+          sample(id, p, luma) * 4 -
+          sample(id, p - w * 4, luma) -
+          sample(id, p - 4, luma) -
+          sample(id, p + 4, luma) -
+          sample(id, p + w * 4, luma);
       }
 
       od[p + 1] = lightness;
@@ -230,11 +329,12 @@ const skinDetect = (options: Options, i: ImgDataLike, o: ImgDataLike): void => {
   const od = o.data;
   const w = i.width;
   const h = i.height;
+  const luma = lumaFor(options);
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const p = (y * w + x) * 4;
-      const lightness = cie(id[p], id[p + 1], id[p + 2]) / 255;
+      const lightness = luma(id[p], id[p + 1], id[p + 2]) / 255;
       const skin = skinColor(options, id[p], id[p + 1], id[p + 2]);
       const isSkinColor = skin > options.skinThreshold;
       const isSkinBrightness =
@@ -259,11 +359,12 @@ const saturationDetect = (
   const od = o.data;
   const w = i.width;
   const h = i.height;
+  const luma = lumaFor(options);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const p = (y * w + x) * 4;
 
-      const lightness = cie(id[p], id[p + 1], id[p + 2]) / 255;
+      const lightness = luma(id[p], id[p + 1], id[p + 2]) / 255;
       const sat = saturation(id[p], id[p + 1], id[p + 2]);
 
       const acceptableSaturation = sat > options.saturationThreshold;
@@ -365,18 +466,37 @@ const importance = (
   return s + d;
 };
 
+interface ScoreExtras {
+  /** Saliency per score-grid cell, 0–1, same layout as the downsampled output. */
+  saliency: Float32Array | null;
+  /** Texture-damped detail per score-grid cell, 0–1, replacing the raw detail. */
+  detail: Float32Array | null;
+  /** Combined importance per score-grid cell, 0–1, used by the border penalty. */
+  content: Float32Array | null;
+  /** External importance map resampled to the score grid, 0–1. */
+  map: Float32Array | null;
+  imageWidth: number;
+  imageHeight: number;
+}
+
 const score = (
   options: Options,
   output: ImgDataLike,
-  crop: Crop
+  crop: Crop,
+  extras?: ScoreExtras
 ): CropScore => {
-  const result = {
+  const result: CropScore = {
     detail: 0,
     saturation: 0,
     skin: 0,
     boost: 0,
     total: 0,
   };
+  const sal = extras?.saliency ?? null;
+  const damped = extras?.detail ?? null;
+  const ext = extras?.map ?? null;
+  let saliency = 0;
+  let mapSum = 0;
 
   const od = output.data;
   const downSample = options.scoreDownSample;
@@ -390,13 +510,15 @@ const score = (
       const p =
         (~~(y * invDownSample) * outputWidth + ~~(x * invDownSample)) * 4;
       const i = importance(options, crop, x, y);
-      const detail = od[p + 1] / 255;
+      const detail = damped ? damped[p >> 2] : od[p + 1] / 255;
 
       result.skin += (od[p] / 255) * (detail + options.skinBias) * i;
       result.detail += detail * i;
       result.saturation +=
         (od[p + 2] / 255) * (detail + options.saturationBias) * i;
       result.boost += (od[p + 3] / 255) * i;
+      if (sal) saliency += sal[p >> 2] * i;
+      if (ext) mapSum += ext[p >> 2] * i;
     }
   }
 
@@ -406,7 +528,117 @@ const score = (
       result.saturation * options.saturationWeight +
       result.boost * options.boostWeight) /
     (crop.width * crop.height);
+
+  // Opt-in terms, scaled like the sums above: a cell with value 1 and
+  // importance 1 contributes 1 per score-grid cell.
+  const cellsPerArea =
+    (output.width * output.height) / (crop.width * crop.height);
+  if (sal && options.saliencyWeight) {
+    result.saliency = saliency;
+    result.total +=
+      (saliency * options.saliencyWeight) / (crop.width * crop.height);
+  }
+  if (extras && options.centerWeight) {
+    const dx = (crop.x + crop.width / 2) / extras.imageWidth - 0.5;
+    const dy = (crop.y + crop.height / 2) / extras.imageHeight - 0.5;
+    result.center = 1 - Math.sqrt(dx * dx + dy * dy) / Math.SQRT1_2;
+    result.total += result.center * options.centerWeight * cellsPerArea;
+  }
+  if (ext && options.importanceMapWeight) {
+    result.map = mapSum;
+    result.total +=
+      (mapSum * options.importanceMapWeight) / (crop.width * crop.height);
+  }
+  if (extras?.content && options.borderPenalty) {
+    result.border = borderContent(extras.content, output, crop, downSample);
+    result.total -= result.border * options.borderPenalty * cellsPerArea;
+  }
   return result;
+};
+
+// Mean of the content grid along the crop's edges, skipping edges that lie on
+// the image border (they cut nothing).
+const borderContent = (
+  content: Float32Array,
+  grid: { width: number; height: number },
+  crop: Crop,
+  factor: number
+): number => {
+  const gw = grid.width;
+  const gh = grid.height;
+  const x0 = Math.floor(crop.x / factor);
+  const y0 = Math.floor(crop.y / factor);
+  const x1 = Math.min(gw - 1, Math.floor((crop.x + crop.width - 1) / factor));
+  const y1 = Math.min(gh - 1, Math.floor((crop.y + crop.height - 1) / factor));
+  let sum = 0;
+  let n = 0;
+  if (x0 > 0) for (let y = y0; y <= y1; y++, n++) sum += content[y * gw + x0];
+  if (x1 < gw - 1)
+    for (let y = y0; y <= y1; y++, n++) sum += content[y * gw + x1];
+  if (y0 > 0) for (let x = x0; x <= x1; x++, n++) sum += content[y0 * gw + x];
+  if (y1 < gh - 1)
+    for (let x = x0; x <= x1; x++, n++) sum += content[y1 * gw + x];
+  return n ? sum / n : 0;
+};
+
+// Average an external importance map into the score grid (gw x gh), 0–1.
+const resampleMap = (map: ImportanceMap, gw: number, gh: number) => {
+  const scale = map.data instanceof Float32Array ? 1 : 1 / 255;
+  const grid = new Float32Array(gw * gh);
+  for (let gy = 0; gy < gh; gy++) {
+    const y0 = Math.floor((gy * map.height) / gh);
+    const y1 = Math.max(y0 + 1, Math.floor(((gy + 1) * map.height) / gh));
+    for (let gx = 0; gx < gw; gx++) {
+      const x0 = Math.floor((gx * map.width) / gw);
+      const x1 = Math.max(x0 + 1, Math.floor(((gx + 1) * map.width) / gw));
+      let sum = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) sum += map.data[y * map.width + x];
+      }
+      grid[gy * gw + gx] = (sum * scale) / ((y1 - y0) * (x1 - x0));
+    }
+  }
+  return grid;
+};
+
+// Per-cell maps derived from the downsampled output for the opt-in terms.
+const gridMaps = (
+  options: Options,
+  scoreOutput: ImgDataLike,
+  saliency: Float32Array | null,
+  map: Float32Array | null
+) => {
+  const { width: gw, height: gh, data: sod } = scoreOutput;
+  const n = gw * gh;
+  let detail: Float32Array | null = null;
+  if (options.textureDamping) {
+    const raw = new Float32Array(n);
+    for (let c = 0; c < n; c++) raw[c] = sod[c * 4 + 1] / 255;
+    const local = boxBlur(raw, gw, gh, 2);
+    detail = new Float32Array(n);
+    for (let c = 0; c < n; c++) {
+      detail[c] = Math.max(0, raw[c] - options.textureDamping * local[c]);
+    }
+  }
+  let content: Float32Array | null = null;
+  if (options.borderPenalty) {
+    content = new Float32Array(n);
+    let max = 0;
+    for (let c = 0; c < n; c++) {
+      const d = detail ? detail[c] : sod[c * 4 + 1] / 255;
+      const v =
+        d * options.detailWeight +
+        (sod[c * 4] / 255) * options.skinWeight +
+        (sod[c * 4 + 2] / 255) * options.saturationWeight +
+        (sod[c * 4 + 3] / 255) * options.boostWeight +
+        (saliency ? saliency[c] * options.saliencyWeight : 0) +
+        (map ? map[c] * options.importanceMapWeight : 0);
+      content[c] = v;
+      if (v > max) max = v;
+    }
+    if (max > 0) for (let c = 0; c < n; c++) content[c] /= max;
+  }
+  return { detail, content, map };
 };
 
 const downSample = (input: ImgDataLike, factor: number): ImgData => {
@@ -451,24 +683,210 @@ const downSample = (input: ImgDataLike, factor: number): ImgData => {
   return output;
 };
 
+// Frequency-tuned colour-contrast saliency (Achanta et al., CVPR 2009):
+// distance of each slightly blurred pixel's Lab colour from the image's mean
+// Lab colour, averaged into the score grid and normalised to 0–1.
+const srgbToLinear = (c: number) => {
+  c /= 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+};
+const labF = (t: number) =>
+  t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+
+const boxBlur = (src: Float32Array, w: number, h: number, r: number) => {
+  const tmp = new Float32Array(src.length);
+  const out = new Float32Array(src.length);
+  const span = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let k = -r; k <= r; k++) {
+        sum += src[y * w + Math.min(w - 1, Math.max(0, x + k))];
+      }
+      tmp[y * w + x] = sum / span;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let k = -r; k <= r; k++) {
+        sum += tmp[Math.min(h - 1, Math.max(0, y + k)) * w + x];
+      }
+      out[y * w + x] = sum / span;
+    }
+  }
+  return out;
+};
+
+const colorContrastSaliency = (
+  input: ImgDataLike,
+  factor: number
+): Float32Array => {
+  const { width: w, height: h, data } = input;
+  const n = w * h;
+  const L = new Float32Array(n);
+  const A = new Float32Array(n);
+  const B = new Float32Array(n);
+  let mL = 0;
+  let mA = 0;
+  let mB = 0;
+  for (let i = 0; i < n; i++) {
+    const r = srgbToLinear(data[i * 4]);
+    const g = srgbToLinear(data[i * 4 + 1]);
+    const b = srgbToLinear(data[i * 4 + 2]);
+    const fx = labF((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047);
+    const fy = labF(0.2126 * r + 0.7152 * g + 0.0722 * b);
+    const fz = labF((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883);
+    L[i] = 116 * fy - 16;
+    A[i] = 500 * (fx - fy);
+    B[i] = 200 * (fy - fz);
+    mL += L[i];
+    mA += A[i];
+    mB += B[i];
+  }
+  mL /= n;
+  mA /= n;
+  mB /= n;
+  const r = Math.max(1, Math.round(Math.min(w, h) / 100));
+  const bL = boxBlur(L, w, h, r);
+  const bA = boxBlur(A, w, h, r);
+  const bB = boxBlur(B, w, h, r);
+
+  const gw = Math.floor(w / factor);
+  const gh = Math.floor(h / factor);
+  const grid = new Float32Array(gw * gh);
+  let max = 0;
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let sum = 0;
+      for (let v = 0; v < factor; v++) {
+        for (let u = 0; u < factor; u++) {
+          const i = (gy * factor + v) * w + gx * factor + u;
+          const dl = bL[i] - mL;
+          const da = bA[i] - mA;
+          const db = bB[i] - mB;
+          sum += Math.sqrt(dl * dl + da * da + db * db);
+        }
+      }
+      grid[gy * gw + gx] = sum;
+      if (sum > max) max = sum;
+    }
+  }
+  if (max > 0) for (let i = 0; i < grid.length; i++) grid[i] /= max;
+  return grid;
+};
+
+// Pixels per cell of the learned scorer's grid (fixed: the weights depend on it).
+const LEARNED_GRID = 4;
+const LEARNED_DAMPING = 0.5;
+
+const learnedMaps = (
+  options: Options,
+  input: ImgDataLike,
+  output: ImgDataLike
+): LearnedMaps => {
+  const factor = LEARNED_GRID;
+  const sod = downSample(output, factor);
+  const { width: gw, height: gh, data } = sod;
+  const n = gw * gh;
+  const raw = new Float32Array(n);
+  for (let c = 0; c < n; c++) raw[c] = data[c * 4 + 1] / 255;
+  const local = boxBlur(raw, gw, gh, 4);
+  const detail = new Float32Array(n);
+  const skin = new Float32Array(n);
+  const sat = new Float32Array(n);
+  const boost = new Float32Array(n);
+  for (let c = 0; c < n; c++) {
+    detail[c] = Math.max(0, raw[c] - LEARNED_DAMPING * local[c]);
+    skin[c] = data[c * 4] / 255;
+    sat[c] = data[c * 4 + 2] / 255;
+    boost[c] = data[c * 4 + 3] / 255;
+  }
+  const luma = new Float32Array(n);
+  const id = input.data;
+  // Luminance gradient magnitude, averaged per cell.
+  const iw = input.width;
+  const ih = input.height;
+  const full = new Float32Array(iw * ih);
+  for (let i = 0; i < full.length; i++) {
+    full[i] = rec709(id[i * 4], id[i * 4 + 1], id[i * 4 + 2]);
+  }
+  const gradient = new Float32Array(n);
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let sum = 0;
+      for (let v = 0; v < factor; v++) {
+        const y = gy * factor + v;
+        const ya = Math.max(0, y - 1);
+        const yb = Math.min(ih - 1, y + 1);
+        for (let u = 0; u < factor; u++) {
+          const x = gx * factor + u;
+          const dx = full[y * iw + Math.min(iw - 1, x + 1)] - full[y * iw + Math.max(0, x - 1)];
+          const dy = full[yb * iw + x] - full[ya * iw + x];
+          sum += Math.sqrt(dx * dx + dy * dy);
+        }
+      }
+      gradient[gy * gw + gx] = sum / (factor * factor * 255);
+    }
+  }
+  const inv = 1 / (factor * factor);
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let sum = 0;
+      for (let v = 0; v < factor; v++) {
+        for (let u = 0; u < factor; u++) {
+          const p = ((gy * factor + v) * input.width + gx * factor + u) * 4;
+          sum += rec709(id[p], id[p + 1], id[p + 2]);
+        }
+      }
+      luma[gy * gw + gx] = sum * inv;
+    }
+  }
+  return {
+    gw,
+    gh,
+    factor,
+    width: input.width,
+    height: input.height,
+    maps: [
+      detail,
+      skin,
+      sat,
+      colorContrastSaliency(input, factor),
+      options.importanceMap ? resampleMap(options.importanceMap, gw, gh) : null,
+      options.boost?.length ? boost : null,
+      gradient,
+    ],
+    luma,
+    boosts: options.boost ?? [],
+  };
+};
+
 const analyse = (options: Options, input: ImgDataLike): CropResult => {
   const result = {} as CropResult;
   const output = new ImgData(input.width, input.height);
 
-  edgeDetect(input, output);
+  edgeDetect(input, output, lumaFor(options));
   skinDetect(options, input, output);
   saturationDetect(options, input, output);
   applyBoosts(options, output);
 
+  if (options.scorer === 'learned') {
+    return analyseLearned(options, input, output, result);
+  }
+
   const scoreOutput = downSample(output, options.scoreDownSample);
+  const extras = classicExtras(options, input, scoreOutput);
 
   let topScore = -Infinity;
   let topCrop: Crop | null = null;
-  const crops = generateCrops(options, input.width, input.height);
+  const crops: Crop[] = options.candidates
+    ? options.candidates.map((c) => ({ ...c }))
+    : generateCrops(options, input.width, input.height);
 
   for (let i = 0, iLen = crops.length; i < iLen; i++) {
     const crop = crops[i];
-    crop.score = score(options, scoreOutput, crop);
+    crop.score = score(options, scoreOutput, crop, extras);
     if (crop.score.total > topScore) {
       topCrop = crop;
       topScore = crop.score.total;
@@ -478,12 +896,161 @@ const analyse = (options: Options, input: ImgDataLike): CropResult => {
   // topCrop is only null if no crop fits, which crop() does not handle.
   result.topCrop = topCrop as Crop;
 
+  if (options.candidates) result.crops = crops;
   if (options.debug && topCrop) {
     result.crops = crops;
     result.debugOutput = output;
     result.debugOptions = options;
     // Create a copy which will not be adjusted by the post scaling of smartcrop.crop
     result.debugTopCrop = { ...result.topCrop };
+  }
+  return result;
+};
+
+// Extra grid maps for the opt-in classic terms; undefined keeps the original
+// arithmetic exact.
+const classicExtras = (
+  options: Options,
+  input: ImgDataLike,
+  scoreOutput: ImgDataLike
+): ScoreExtras | undefined => {
+  let extras: ScoreExtras | undefined;
+  if (
+    options.saliencyWeight ||
+    options.centerWeight ||
+    options.textureDamping ||
+    options.borderPenalty ||
+    (options.importanceMap && options.importanceMapWeight)
+  ) {
+    const saliency = options.saliencyWeight
+      ? colorContrastSaliency(input, options.scoreDownSample)
+      : null;
+    const map =
+      options.importanceMap && options.importanceMapWeight
+        ? resampleMap(
+            options.importanceMap,
+            scoreOutput.width,
+            scoreOutput.height
+          )
+        : null;
+    extras = {
+      saliency,
+      ...gridMaps(options, scoreOutput, saliency, map),
+      imageWidth: input.width,
+      imageHeight: input.height,
+    };
+  }
+  return extras;
+};
+
+// z-score a list in place (no-op for a constant list).
+const standardize = (xs: number[]): number[] => {
+  const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const sd = Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length);
+  return xs.map((x) => (sd > 0 ? (x - m) / sd : 0));
+};
+
+const IDX = {
+  detail: featureIndex('detail.recall'),
+  saliency: featureIndex('saliency.recall'),
+  importance: featureIndex('importance.recall'),
+  faceCut: featureIndex('faceCut'),
+};
+// Face/box cut tolerated by the content floor (fraction of boost-box area).
+const FLOOR_FACE_CUT = 0.1;
+
+// Push crops below the content floor behind all others; when nothing passes,
+// score by retained mass instead. Returns the new top crop.
+const applyContentFloor = (
+  options: Options,
+  hasBoost: boolean,
+  hasMap: boolean,
+  feats: Float32Array,
+  crops: Crop[]
+): Crop | null => {
+  const retained = crops.map((_, i) => {
+    const f = i * FEATURE_COUNT;
+    return hasMap
+      ? feats[f + IDX.importance]
+      : (feats[f + IDX.saliency] + feats[f + IDX.detail]) / 2;
+  });
+  const pass = crops.map(
+    (_, i) =>
+      retained[i] >= options.contentFloor &&
+      !(hasBoost && feats[i * FEATURE_COUNT + IDX.faceCut] > FLOOR_FACE_CUT)
+  );
+  const any = pass.some(Boolean);
+  let top: Crop | null = null;
+  let topScore = -Infinity;
+  crops.forEach((c, i) => {
+    const s = c.score!;
+    s.total = any ? s.total - (pass[i] ? 0 : 1e6) : retained[i];
+    if (s.total > topScore || !top) {
+      topScore = s.total;
+      top = c;
+    }
+  });
+  return top;
+};
+
+const analyseLearned = (
+  options: Options,
+  input: ImgDataLike,
+  output: ImgDataLike,
+  result: CropResult
+): CropResult => {
+  const ctx = learnedContext(learnedMaps(options, input, output));
+  const crops: Crop[] = options.candidates
+    ? options.candidates.map((c) => ({ ...c }))
+    : generateCrops(
+        {
+          ...options,
+          step: Math.min(options.step, 4),
+          scaleStep: Math.min(options.scaleStep, 0.05),
+        },
+        input.width,
+        input.height
+      );
+  const feats = new Float32Array(crops.length * FEATURE_COUNT);
+  const model = defaultModel();
+  let topScore = -Infinity;
+  let topCrop: Crop | null = null;
+  for (let i = 0; i < crops.length; i++) {
+    const c = crops[i];
+    learnedFeatures(ctx, c.x, c.y, c.width, c.height, feats, i * FEATURE_COUNT);
+    const total = learnedScore(feats, i * FEATURE_COUNT, model);
+    c.score = { detail: 0, saturation: 0, skin: 0, boost: 0, total };
+    if (total > topScore || !topCrop) {
+      topScore = total;
+      topCrop = c;
+    }
+  }
+  if (options.classicBlend > 0 && crops.length > 1) {
+    // Blend in the classic score (with whatever classic weights were passed),
+    // both standardised over this image's candidates.
+    const scoreOutput = downSample(output, options.scoreDownSample);
+    const extras = classicExtras(options, input, scoreOutput);
+    const zl = standardize(crops.map((c) => c.score!.total));
+    const zc = standardize(crops.map((c) => score(options, scoreOutput, c, extras).total));
+    topScore = -Infinity;
+    crops.forEach((c, i) => {
+      c.score!.total = zl[i] + options.classicBlend * zc[i];
+      if (c.score!.total > topScore) {
+        topScore = c.score!.total;
+        topCrop = c;
+      }
+    });
+  }
+  if (options.contentFloor > 0) {
+    topCrop = applyContentFloor(options, ctx.boosts.length > 0, ctx.sums[4] !== null, feats, crops);
+  }
+  result.topCrop = topCrop as Crop;
+  if (options.candidates || options.debug) result.crops = crops;
+  if (options.emitFeatures) result.features = feats;
+  if (options.debug && topCrop) {
+    result.debugOutput = output as ImgDataLike;
+    result.debugOptions = options;
+    result.debugTopCrop = { ...topCrop };
   }
   return result;
 };
@@ -554,6 +1121,11 @@ const crop = (
   callback?: (result: CropResult) => void
 ): Promise<CropResult> => {
   const options: Options = { ...smartcrop.DEFAULTS, ...options_ };
+  // The learned scorer ranks crops of any size; search 0.4-1 of the largest
+  // crop unless the caller says otherwise.
+  if (options.scorer === 'learned' && options_?.minScale === undefined) {
+    options.minScale = 0.4;
+  }
 
   if (options.aspect) {
     options.width = options.aspect;
@@ -568,11 +1140,15 @@ const crop = (
 
   let scale = 1;
   let prescale = 1;
+  let imageWidth = 0;
+  let imageHeight = 0;
 
   // open the image
   return iop
     .open(inputImage, options.input)
     .then((image) => {
+      imageWidth = image.width;
+      imageHeight = image.height;
       // calculate desired crop dimensions based on the image size
       if (options.width && options.height) {
         scale = Math.min(
@@ -621,20 +1197,49 @@ const crop = (
     })
     .then((image) =>
       iop.getData(image).then((data) => {
+        if (options.candidates && prescale !== 1) {
+          options.candidates = options.candidates.map((c) => ({
+            x: c.x * prescale,
+            y: c.y * prescale,
+            width: c.width * prescale,
+            height: c.height * prescale,
+          }));
+        }
         const result = analyse(options, data);
 
         const crops = result.crops || [result.topCrop];
         for (let i = 0, iLen = crops.length; i < iLen; i++) {
           const crop = crops[i];
+          if (options.candidates) {
+            crop.x /= prescale;
+            crop.y /= prescale;
+            crop.width /= prescale;
+            crop.height /= prescale;
+            continue;
+          }
           crop.x = ~~(crop.x / prescale);
           crop.y = ~~(crop.y / prescale);
           crop.width = ~~(crop.width / prescale);
           crop.height = ~~(crop.height / prescale);
         }
+        result.position = positionOf(result.topCrop, imageWidth, imageHeight);
         if (callback) callback(result);
         return result;
       })
     );
+};
+
+const positionOf = (
+  crop: Crop,
+  imageWidth: number,
+  imageHeight: number
+): CropPosition => {
+  const percent = (offset: number, slack: number) =>
+    slack > 0 ? Math.min(100, Math.max(0, (100 * offset) / slack)) : 50;
+  return {
+    x: percent(crop.x, imageWidth - crop.width),
+    y: percent(crop.y, imageHeight - crop.height),
+  };
 };
 
 // Check if all the dependencies are there
@@ -686,16 +1291,55 @@ const DEFAULTS: Options = {
   imageOperations: null,
   canvasFactory: defaultCanvasFactory,
   debug: false,
+  luminance: 'classic',
+  saliencyWeight: 0,
+  centerWeight: 0,
+  textureDamping: 0,
+  borderPenalty: 0,
+  importanceMapWeight: 0,
+  scorer: 'classic',
+  contentFloor: 0,
+  classicBlend: 0,
+};
+
+/**
+ * Named option bundles. `next` collects improvements that change which crop
+ * is picked; it is opt-in during 3.x: `crop(img, { ...PRESETS.next, width, height })`.
+ */
+const PRESETS: Record<'classic' | 'next', CropOptions> = {
+  classic: {},
+  // Learned composition scorer (trained on GAICD human ratings). Its maps use
+  // the classic luminance, which the weights were trained with.
+  next: { scorer: 'learned' },
 };
 
 const smartcrop = {
   // Promise implementation to use
   Promise: Promise as PromiseConstructor,
   DEFAULTS,
+  PRESETS,
   crop,
   isAvailable,
   importance,
   ImgData,
+  /**
+   * @internal Learned-scorer feature vectors (FEATURE_COUNT floats per crop)
+   * for the given candidate crops, for training. `options` needs aspect or
+   * width/height so the image is prescaled the same way crop() does.
+   */
+  _features: async (
+    image: unknown,
+    candidates: CropBox[],
+    options?: CropOptions
+  ): Promise<Float32Array> => {
+    const r = await crop(image, {
+      ...options,
+      scorer: 'learned',
+      candidates,
+      emitFeatures: true,
+    });
+    return r.features!;
+  },
   _downSample: downSample,
   _canvasImageOperations: canvasImageOperations,
 };

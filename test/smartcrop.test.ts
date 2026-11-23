@@ -133,6 +133,71 @@ describe('crop', () => {
   });
 });
 
+describe('position', () => {
+  it('reports the crop as object-position percentages', async () => {
+    const result = await crop(img, { width: 64, height: 64 });
+    const { x, y, width, height } = result.topCrop;
+    const expectPercent = (offset: number, slack: number) =>
+      slack > 0 ? (100 * offset) / slack : 50;
+    expect(result.position!.x).toBeCloseTo(
+      expectPercent(x, img.width - width),
+      6
+    );
+    expect(result.position!.y).toBeCloseTo(
+      expectPercent(y, img.height - height),
+      6
+    );
+  });
+
+  it('is 50% on an axis with no slack', async () => {
+    const c = createCanvas(100, 50);
+    const result = await crop(c, { width: 100, height: 25 });
+    expect(result.topCrop.width).toBe(100);
+    expect(result.position!.x).toBe(50);
+  });
+});
+
+describe('importanceMap', () => {
+  it('pulls the crop toward the important region', async () => {
+    // A flat grey image: nothing to choose between without the map.
+    const c = createCanvas(300, 100);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#808080';
+    ctx.fillRect(0, 0, 300, 100);
+    const map = { width: 30, height: 10, data: new Float32Array(300) };
+    for (let y = 0; y < 10; y++) {
+      for (let x = 0; x < 5; x++) map.data[y * 30 + x] = 1;
+    }
+    const plain = await crop(c, { width: 100, height: 100 });
+    const mapped = await crop(c, {
+      width: 100,
+      height: 100,
+      importanceMap: map,
+      importanceMapWeight: 1,
+    });
+    // Without the map the image-border "detail" pulls the crop right.
+    expect(plain.topCrop.x).toBe(200);
+    expect(mapped.topCrop.x).toBe(0);
+  });
+});
+
+describe('PRESETS', () => {
+  it('classic matches the defaults', async () => {
+    const a = await crop(img, { width: 100, height: 100 });
+    const b = await crop(img, {
+      ...smartcrop.PRESETS.classic,
+      width: 100,
+      height: 100,
+    });
+    expect(b.topCrop).toEqual(a.topCrop);
+  });
+
+  it('next uses the learned scorer; the default stays classic', () => {
+    expect(smartcrop.PRESETS.next.scorer).toBe('learned');
+    expect(smartcrop.DEFAULTS.scorer).toBe('classic');
+  });
+});
+
 describe('iop.open', () => {
   it('passes input options', async () => {
     const iop = internals._canvasImageOperations(canvasFactory);
@@ -217,5 +282,59 @@ describe('_downSample', () => {
       expect(v).toBeGreaterThanOrEqual(118);
       expect(v).toBeLessThanOrEqual(120);
     }
+  });
+});
+
+describe('learned scorer', () => {
+  it('returns a valid crop of the requested aspect', async () => {
+    const result = await crop(img, { aspect: 1, scorer: 'learned' });
+    expectValidResult(result);
+    expectAspectRatio(result, 1);
+  });
+
+  it('honours boost boxes and the content floor', async () => {
+    const result = await crop(img, {
+      width: 3,
+      height: 2,
+      scorer: 'learned',
+      contentFloor: 0.5,
+      boost: [{ x: 10, y: 10, width: 40, height: 40, weight: 1 }],
+    });
+    expectValidResult(result);
+  });
+
+  it('scores exactly the given candidates, one score each', async () => {
+    const candidates = [
+      { x: 0, y: 0, width: img.width, height: img.height },
+      { x: 10, y: 20, width: 100, height: 80 },
+      { x: 33.5, y: 7, width: 200, height: 120 },
+    ];
+    for (const scorer of ['learned', 'classic'] as const) {
+      const result = await crop(img, {
+        width: img.width,
+        height: img.height,
+        scorer,
+        candidates,
+      });
+      expect(result.crops).toHaveLength(candidates.length);
+      result.crops!.forEach((c, i) => {
+        expect(c.x).toBeCloseTo(candidates[i].x, 6);
+        expect(c.width).toBeCloseTo(candidates[i].width, 6);
+        expect(Number.isFinite(c.score!.total)).toBe(true);
+      });
+    }
+  });
+
+  it('exposes one feature vector per candidate', async () => {
+    const f = await internals._features(
+      img,
+      [
+        { x: 0, y: 0, width: 100, height: 100 },
+        { x: 50, y: 50, width: 120, height: 90 },
+      ],
+      { width: img.width, height: img.height, canvasFactory }
+    );
+    expect(f.length % 2).toBe(0);
+    expect(f.every(Number.isFinite)).toBe(true);
   });
 });
