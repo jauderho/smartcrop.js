@@ -125,7 +125,7 @@ scorer, as an optional local ONNX plug-in.
 - **Design.**
   - Run the ONNX backbone and export only the feature map.
   - Do RoI/RoD pooling in JS; optionally PCA the map to about 32 channels.
-  - Concatenate with the 117 hand features and train a small head.
+  - Concatenate with the 141 hand features and train a small head.
 - **Expected gain** (inference): with a frozen backbone, about +0.04 to +0.09
   SRCC and +4 to +9 Acc10-mean. Reaching GAIC's level probably needs
   fine-tuning the backbone.
@@ -133,6 +133,22 @@ scorer, as an optional local ONNX plug-in.
   terms are unstated: the code is MIT, and the images are crawled from Flickr.
   FCDB is a Flickr-sourced research set. Weights trained on them are
   research-use until the dataset authors are asked.
+
+**Built (2026-11-23).** We used MobileNetV2 taps at strides 8, 16 and 32 (448
+channels at stride 16), a PCA to 32 channels, and 3×3 RoI and RoD pooling
+plus the global mean. The 141 hand features and 608 CNN features feed a
+32-32 MLP. Five other configurations (K=5, a 64-32 head, other L2 values)
+were within noise on val.
+
+Results:
+
+- GAICD val SRCC 0.755 → 0.807.
+- GAICD test SRCC 0.739 → 0.795, Acc1/5 50.4 → 54.0.
+- FCDB 0.765 → 0.769, FLMS 0.925 → 0.931.
+- The only subset that dropped is FCDB faces (0.803 → 0.800, noise).
+
+The gap to GAIC (about 0.85) remains, and would probably need a fine-tuned
+backbone.
 
 ## Recommendation
 

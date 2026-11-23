@@ -57,12 +57,13 @@ Held-out test sets that were never used to train or select anything. IoU is
 the overlap with a human crop (higher is better). GAICD measures how well a
 method ranks about 86 human-scored crops per photo.
 
-| method                               | GAICD SRCC | GAICD best pick in human top 5 |  FCDB IoU |  FLMS IoU |
-| ------------------------------------ | ---------: | -----------------------------: | --------: | --------: |
-| always centre                        |      0.432 |                          47.4% |     0.701 |     0.894 |
-| original (2.0.5 / `classic`)         |      0.369 |                          22.4% |     0.718 |     0.918 |
-| learned, pure JS                     |      0.623 |                          48.0% |     0.744 |     0.917 |
-| **learned + local faces & saliency** |  **0.739** |                      **50.4%** | **0.765** | **0.925** |
+| method                              | GAICD SRCC | GAICD best pick in human top 5 |  FCDB IoU |  FLMS IoU |
+| ----------------------------------- | ---------: | -----------------------------: | --------: | --------: |
+| always centre                       |      0.432 |                          47.4% |     0.701 |     0.894 |
+| original (2.0.5 / `classic`)        |      0.369 |                          22.4% |     0.718 |     0.918 |
+| learned, pure JS                    |      0.623 |                          48.0% |     0.744 |     0.917 |
+| learned + local faces & saliency    |      0.739 |                          50.4% |     0.765 |     0.925 |
+| **learned + faces, saliency & CNN** |  **0.795** |                      **54.0%** | **0.769** | **0.931** |
 
 By content type, on FCDB test (original → learned + faces & saliency):
 
@@ -79,7 +80,7 @@ and people. The learned scorer keeps them.
 
 The original scores a sliding window by Laplacian detail, a skin-colour
 detector and saturation. Texture therefore wins over subjects. The learned
-scorer instead describes each candidate crop with 117 features, computed from
+scorer instead describes each candidate crop with 141 features, computed from
 maps smartcrop already builds and read in constant time from summed-area
 tables:
 
@@ -93,7 +94,7 @@ tables:
 - **Faces:** cut fraction, headroom and size, from boost boxes.
 - **Geometry:** area ratio, offset and aspect.
 
-A small MLP (117 → 32 → 32 → 1) ranks the candidates. It was trained
+A small MLP (141 → 32 → 32 → 1) ranks the candidates. It was trained
 pairwise (RankNet) on about 231,000 human-scored crops from GAICD, plus FCDB
 crops. The weights ship in the source as 17 KB of float16, which is verified
 to make the same choices as the full-precision weights. After retraining (`bun bench/learned/train.ts --write`),
@@ -117,7 +118,9 @@ For offline or batch cropping, two small ONNX models run locally with
 onnxruntime-node, and no image leaves the machine:
 
 - YuNet faces, 0.2 MB;
-- U²-Netp salient objects, 4.6 MB.
+- U²-Netp salient objects, 4.6 MB;
+- MobileNetV2 (ImageNet, ONNX model zoo, Apache-2.0), 14 MB, used as a frozen
+  feature backbone for the optional CNN head (below).
 
 They lift the learned scorer to the best numbers in the table above.
 
@@ -142,6 +145,36 @@ const result = await smartcrop.crop(canvas, {
 
 These are opt-in and not dependencies of the core library, which stays plain
 JavaScript for the browser and Node.
+
+#### Optional CNN features
+
+The best results come from adding deep image features. A frozen MobileNetV2
+produces a feature map once per image (about 16 ms). The scorer then pools
+it inside each candidate crop (RoI) and over the area the crop cuts away
+(RoD), as GAIC does, and a second learned head ranks the crops with these
+features plus the hand-made ones. The pooling runs in plain JS, and the head
+and its fixed PCA projection ship separately as float16
+(`src/learned-cnn-weights.ts`, about 113 KB of source). The core bundle does
+not include them.
+
+```javascript
+import { cnnFeatureMap } from "./plugins/onnx/cnn";
+import { LEARNED_CNN_PACKED } from "./src/learned-cnn-weights";
+
+const result = await smartcrop.crop(canvas, {
+  width: 1200,
+  height: 545,
+  scorer: "learned",
+  boost: faceBoosts(faces, { imageWidth: width, imageHeight: height }),
+  importanceMap: await saliencyMap(imageData),
+  featureMap: await cnnFeatureMap(imageData),
+  cnnModel: LEARNED_CNN_PACKED,
+});
+```
+
+The CNN head was trained with faces and saliency present, so use all three
+together. Scoring the dense candidate search is slower with it (about 0.3 s
+per image), which suits offline precomputation.
 
 ### Other additions
 
@@ -383,7 +416,7 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 ### 3.1.0 (unreleased)
 
 - Opt-in learned crop scorer (`scorer: 'learned'`, `PRESETS.next`), trained on human-rated crops.
-- Optional local ONNX face and saliency plug-ins (`plugins/onnx`).
+- Optional local ONNX face, saliency and CNN-feature plug-ins (`plugins/onnx`), with pinned model checksums.
 - `result.position`, `candidates`, and opt-in classic terms (`luminance`, `centerWeight`, `textureDamping`, `saliencyWeight`, `borderPenalty`, `importanceMap`).
 - Benchmark, tuning and gallery tooling in `bench/`.
 

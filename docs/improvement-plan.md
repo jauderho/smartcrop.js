@@ -158,19 +158,21 @@ or GAICD test.
 
 ## Results (2026-11-22, held-out test sets, measured once after selection)
 
-The learned scorer (`scorer: 'learned'`, `PRESETS.next`) is a 117-feature,
+The learned scorer (`scorer: 'learned'`, `PRESETS.next`) is a 141-feature,
 32-32 MLP trained pairwise on GAICD train MOS plus FCDB-train windows. It is
 selected on GAICD val and an FCDB-train holdout. "+fs" adds the local ONNX
 face (YuNet) and saliency (U²-Netp) maps.
 
-| | GAICD SRCC | Acc1/5 | Acc10 mean | FCDB IoU | FLMS IoU |
-|---|---|---|---|---|---|
-| centre crop | 0.432 | 47.4 | 48.4 | 0.701 | 0.894 |
-| original (classic) | 0.369 | 22.4 | 33.2 | 0.718 | 0.918 |
-| learned, pure JS | 0.623 | 48.0 | 61.5 | 0.744 | 0.917 |
-| **learned + faces/saliency** | **0.739** | **50.4** | **68.3** | **0.765** | **0.925** |
+|                                    | GAICD SRCC | Acc1/5   | Acc10 mean | FCDB IoU  | FLMS IoU  |
+| ---------------------------------- | ---------- | -------- | ---------- | --------- | --------- |
+| centre crop                        | 0.432      | 47.4     | 48.4       | 0.701     | 0.894     |
+| original (classic)                 | 0.369      | 22.4     | 33.2       | 0.718     | 0.918     |
+| learned, pure JS                   | 0.623      | 48.0     | 61.5       | 0.744     | 0.917     |
+| learned + faces/saliency           | 0.739      | 50.4     | 68.3       | 0.765     | 0.925     |
+| **learned + faces/saliency + CNN** | **0.795**  | **54.0** | **69.3**   | **0.769** | **0.931** |
 
 FCDB per subset, original → learned+fs:
+
 - people 0.761 → 0.795
 - faces 0.764 → 0.803
 - landscape 0.693 → 0.749
@@ -180,11 +182,13 @@ FCDB per subset, original → learned+fs:
 FLMS is level or up in every subset; sky is 0.9245 → 0.9238.
 
 Rejected after measurement:
+
 - Blending in the IoU-tuned classic score: GAICD val SRCC fell to 0.26–0.70.
 - A 5-seed ensemble: +0.005 val SRCC for 5× the weights.
 - A content-preservation floor: no val gain.
 
 Open:
+
 - Acc1/5 stays below the 55 target. Learned CNN features (GAIC-style) are the likely route, which needs downloaded weights.
 - The pure-JS model sometimes loses a small subject, such as a person or the church in the examples. The +fs config fixes most of these.
 
