@@ -54,6 +54,8 @@ const withPlugins = parseWith(take('with'));
 const faceMinScore = Number(take('face-min-score', '0.6'));
 const centerScale = Number(take('center-scale', '0.8'));
 const conc = Math.max(1, Number(take('concurrency', '4')));
+// --per-image <file>: also write per-image smartcrop IoU/BDE (for paired tests).
+const perImagePath = take('per-image');
 
 const dir = join(import.meta.dir, 'datasets', dataset);
 const annFile = Bun.file(join(dir, 'annotations.json'));
@@ -200,6 +202,9 @@ const summarize = (rs: Per[]) => ({
   boxIou: +mean(rs.map((r) => r.boxIou)).toFixed(4),
   boxBde: +mean(rs.map((r) => r.boxBde)).toFixed(4),
 });
+if (perImagePath) {
+  await Bun.write(perImagePath, JSON.stringify(results.smartcrop));
+}
 const n = results.smartcrop.length;
 await loadTags(dataset);
 const idx = indexBySubset(
