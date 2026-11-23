@@ -25,19 +25,19 @@ by the papers.
 
 ## Per approach
 
-| Method | Status | Constraints | Code / weights / licence | Reported results | Cost |
-|---|---|---|---|---|---|
-| GAIC | CVPR'19 / TPAMI | aspect via grid anchors | code; Drive weights; licence unclear | GAICv2 SRCC ≈0.85, Acc1/5 ≈64 | 125–212 FPS (GPU) |
-| S2CNet | AAAI'24 | aspect; multi-object graph | code; GAIC weights only; no licence | GAICv2 SRCC 0.861, Acc5 64.0 | 163 FPS, needs Faster R-CNN |
-| HCIC | ECCV'22 | person box (manually checked) | code, no weights, no licence | FCDB+FLMS human subset IoU 0.747 | not reported |
-| GenCrop | AAAI'24 | subject mask | BSD-3 code, no weights | FCDB 0.654 | 5.7 ms (GPU) |
-| ProCrop | arXiv; AAAI'26 per README | none | 512 MB .pth, Apache-2.0 | FLMS 0.843, GAICv2 Acc1/5 85.4 | retrieval stack |
-| Cropper | CVPR'25 | free-form, subject, aspect | no code; uses hosted Gemini | FCDB aspect 0.756, GAICD Acc̄5 84.3 / SRCC 0.904 | ~3 VLM calls × ~6 s |
-| CROP | arXiv May '26 | composition reasoning | none | FCDB 0.745, FLMS 0.871 | 7B |
-| COMEX | ACM MM'26 | explainable | none | FCDB 0.7225 | 0.8–2B |
-| Venus | CVPR'26 | aesthetic guidance | weights on HF; data gated; licence unknown | FCDB 0.68–0.71 (reported by others) | MLLM |
-| PhotoGuider | arXiv Nov '26 | 60 features + LightGBM, gates | repo and demo; licence unknown | FCDB 0.759 fast / 0.766 full | DINOv3/SAM/CLIP features |
-| CropReward | arXiv Oct '26 | reward model | promised, not released | GAICD-v2 PLCC 0.766 / SRCC 0.716 vs humans | 4.6B |
+| Method      | Status                    | Constraints                   | Code / weights / licence                   | Reported results                                | Cost                        |
+| ----------- | ------------------------- | ----------------------------- | ------------------------------------------ | ----------------------------------------------- | --------------------------- |
+| GAIC        | CVPR'19 / TPAMI           | aspect via grid anchors       | code; Drive weights; licence unclear       | GAICv2 SRCC ≈0.85, Acc1/5 ≈64                   | 125–212 FPS (GPU)           |
+| S2CNet      | AAAI'24                   | aspect; multi-object graph    | code; GAIC weights only; no licence        | GAICv2 SRCC 0.861, Acc5 64.0                    | 163 FPS, needs Faster R-CNN |
+| HCIC        | ECCV'22                   | person box (manually checked) | code, no weights, no licence               | FCDB+FLMS human subset IoU 0.747                | not reported                |
+| GenCrop     | AAAI'24                   | subject mask                  | BSD-3 code, no weights                     | FCDB 0.654                                      | 5.7 ms (GPU)                |
+| ProCrop     | arXiv; AAAI'26 per README | none                          | 512 MB .pth, Apache-2.0                    | FLMS 0.843, GAICv2 Acc1/5 85.4                  | retrieval stack             |
+| Cropper     | CVPR'25                   | free-form, subject, aspect    | no code; uses hosted Gemini                | FCDB aspect 0.756, GAICD Acc̄5 84.3 / SRCC 0.904 | ~3 VLM calls × ~6 s         |
+| CROP        | arXiv May '26             | composition reasoning         | none                                       | FCDB 0.745, FLMS 0.871                          | 7B                          |
+| COMEX       | ACM MM'26                 | explainable                   | none                                       | FCDB 0.7225                                     | 0.8–2B                      |
+| Venus       | CVPR'26                   | aesthetic guidance            | weights on HF; data gated; licence unknown | FCDB 0.68–0.71 (reported by others)             | MLLM                        |
+| PhotoGuider | arXiv Nov '26             | 60 features + LightGBM, gates | repo and demo; licence unknown             | FCDB 0.759 fast / 0.766 full                    | DINOv3/SAM/CLIP features    |
+| CropReward  | arXiv Oct '26             | reward model                  | promised, not released                     | GAICD-v2 PLCC 0.766 / SRCC 0.716 vs humans      | 4.6B                        |
 
 ## Findings that matter for smartcrop
 
@@ -56,8 +56,9 @@ by the papers.
    - Composition: thirds and centre alignment, balance, tightness, negative
      space, boundary placement.
    - Integrity and aesthetics, which matter less.
-   
+
    HCIC adds person-partition features and a content-preserving heatmap.
+
 4. **Nothing small and licensed is ready to ship.** No learned model under
    30 MB has a clear licence and weights. GAIC's MobileNet ranker is the
    closest, but its licence is unclear and it needs a custom RoD op.
@@ -98,6 +99,41 @@ from abstracts, project pages and citing papers.
   - a consistent subject anchor across aspect ratios, for the site
     pipeline.
 
+## Deep-feature (CNN) plug-in: research for a later optional feature
+
+Goal: lift top-1 crop choice by adding learned image features to the learned
+scorer, as an optional local ONNX plug-in.
+
+- **Real gap.** Our split is GAICD-v2. There, GAIC (MobileNetV2) reports SRCC
+  about 0.85 with Acc5-mean about 64 and Acc10-mean about 80. S2CNet reports
+  SRCC 0.861. Ours is 0.739, with Acc10-mean 68.3.
+- **What works in GAIC.**
+  - Backbone: a frozen-shape CNN at a 256 px short side.
+  - Pooling: 9×9 RoIAlign of the crop plus RoDAlign of the discarded area,
+    reduced to about 8 channels by a 1×1 conv, with multi-scale features.
+  - Ablations: RoD adds about +0.01 SRCC and +2 Acc1/5; multi-scale adds
+    about +0.01. MobileNetV2 beats VGG16 and ShuffleNetV2. Stride-32 and
+    ResNet-50 features did worse.
+  - Global CLIP aesthetics rank crops poorly: AesCLIP gets 0.27 SRCC zero-shot
+    (CropReward). Features must be crop-local.
+- **Candidate backbones.**
+  1. MobileNetV2, ONNX model zoo: 13 MB fp32, Apache-2.0 repo, with an
+     ImageNet-weights caveat. It is the best-evidenced choice. Concatenate
+     the stride 8, 16 and 32 blocks (448 channels) at stride 16.
+  2. DINOv2 ViT-S/14, onnx-community: 88 MB fp32 or 24 MB int8,
+     Apache-2.0. Strong semantic patch features, but unproven for cropping.
+- **Design.**
+  - Run the ONNX backbone and export only the feature map.
+  - Do RoI/RoD pooling in JS; optionally PCA the map to about 32 channels.
+  - Concatenate with the 117 hand features and train a small head.
+- **Expected gain** (inference): with a frozen backbone, about +0.04 to +0.09
+  SRCC and +4 to +9 Acc10-mean. Reaching GAIC's level probably needs
+  fine-tuning the backbone.
+- **Licence caveat (applies to the shipped weights too).** GAICD's dataset
+  terms are unstated: the code is MIT, and the images are crawled from Flickr.
+  FCDB is a Flickr-sourced research set. Weights trained on them are
+  research-use until the dataset authors are asked.
+
 ## Recommendation
 
 - **Lightweight production baseline (in progress).** A learned linear or
@@ -107,7 +143,7 @@ from abstracts, project pages and citing papers.
   and centre, balance, geometry, a horizon row, and face headroom and cut.
   It ships as a few KB of weights, with optional U²-Netp and YuNet maps as
   extra inputs.
-  - *Inference:* this is PhotoGuider's design minus the heavy feature
+  - _Inference:_ this is PhotoGuider's design minus the heavy feature
     extractors.
 - **Highest quality.** An offline helper that asks a VLM for subject and crop
   proposals, Cropper-style, then lets the learned ranker refine the choice.
