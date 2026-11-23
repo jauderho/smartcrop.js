@@ -1,17 +1,20 @@
-// Validation gate: does a newly trained model beat the shipped one?
+// Validation gate: is a newly trained model at least as good as the shipped
+// one, up to training noise?
 //
 // Both models are scored on the same selection data train.ts uses: the GAICD
 // val split and (when the model was trained with --fcdb) the last 15% of
 // fcdb-train as holdout. The selection score is val SRCC + holdout IoU of the
 // top-scored window (just SRCC without a holdout). Test splits are never read.
-// Exit code 1 when new <= shipped + margin.
+// Exit code 1 when new < shipped - tolerance: any drop larger than the
+// seed-to-seed noise fails.
 //
 // Usage: bun bench/learned/gate.ts <model.json> [--cnn 3] [--fcdb 0.5]
-//          [--margin 0] [--dumps DIR] [--report out.json] [--markdown out.md]
+//          [--tolerance 0] [--dumps DIR] [--report out.json] [--markdown out.md]
 // model.json is {note, model[, cnn]} as written by train.ts --write --out or
 // combine.ts. --cnn K compares against the shipped cnn head
 // (src/learned-cnn-weights.ts), otherwise against the hand-feature model
-// (src/learned-weights.ts). --margin m demands a lead of at least m.
+// (src/learned-weights.ts). --tolerance t is the allowed drop of the
+// selection score (the measured seed spread, see docs/training-efficiency.md).
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
@@ -30,13 +33,13 @@ const opt = (n: string, d?: string) => {
 const modelPath = args[0];
 if (!modelPath || modelPath.startsWith('--')) {
   console.error(
-    'usage: gate.ts <model.json> [--cnn K] [--fcdb w] [--margin m]'
+    'usage: gate.ts <model.json> [--cnn K] [--fcdb w] [--tolerance t]'
   );
   process.exit(2);
 }
 const cnnK = Number(opt('cnn', '0'));
 const fcdbW = Number(opt('fcdb', '0'));
-const margin = Number(opt('margin', '0'));
+const tolerance = Number(opt('tolerance', '0'));
 const OUT = resolve(opt('dumps') ?? resolve(import.meta.dir, '../out/learned'));
 const suffix = cnnK ? `-faces+saliency+cnn${cnnK === 3 ? '' : cnnK}` : '';
 
@@ -134,7 +137,7 @@ const measure = (m: LearnedModel) => {
 };
 const a = measure(shipped);
 const b = measure(next);
-const pass = b.score > a.score + margin;
+const pass = b.score >= a.score - tolerance;
 
 const f = (x: number | null, d = 4) => (x == null ? '-' : x.toFixed(d));
 const sgn = (x: number | null, y: number | null, d = 4) =>
@@ -150,7 +153,7 @@ const md = [
   `| holdout IoU | ${f(a.holdoutIoU)} | ${f(b.holdoutIoU)} | ${sgn(b.holdoutIoU, a.holdoutIoU)} |`,
   `| **selection score** | ${f(a.score)} | ${f(b.score)} | ${sgn(b.score, a.score)} |`,
   '',
-  `Gate (new score > shipped + ${margin}): **${pass ? 'PASS' : 'FAIL'}**. Validation data only; test splits are not used.`,
+  `Gate (new score >= shipped - ${tolerance}, the training-noise band): **${pass ? 'PASS' : 'FAIL'}**. Validation data only; test splits are not used.`,
 ].join('\n');
 console.log(md);
 const rep = opt('report');
@@ -158,7 +161,7 @@ if (rep)
   await Bun.write(
     rep,
     JSON.stringify(
-      { shipped: a, next: b, margin, pass, cnnK, fcdbW },
+      { shipped: a, next: b, tolerance, pass, cnnK, fcdbW },
       null,
       2
     ) + '\n'
