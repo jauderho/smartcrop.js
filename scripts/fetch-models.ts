@@ -1,5 +1,6 @@
 // Download the ONNX models used by the optional plug-ins in plugins/onnx.
-// Files land in bench/models/ (gitignored); size + sha256 go to models.json.
+// Files land in bench/models/ (gitignored) and must match the pinned sha256;
+// size + sha256 go to models.json.
 // Existing files are skipped. Models are data only; nothing is executed.
 //
 // Usage: bun scripts/fetch-models.ts
@@ -9,15 +10,26 @@ import { join } from 'node:path';
 const MODELS = [
   {
     name: 'face_detection_yunet_2023mar.onnx',
+    sha256: '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4',
     url: 'https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx',
     license: 'MIT (OpenCV Zoo)',
     minBytes: 100_000,
   },
   {
     name: 'u2netp.onnx',
+    sha256: '309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8',
     url: 'https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx',
     license: 'Apache-2.0 (U2-Net)',
     minBytes: 1_000_000,
+  },
+  {
+    // ImageNet MobileNetV2 (MXNet Gluon) from the ONNX model zoo; used as a
+    // frozen feature backbone by plugins/onnx/cnn.ts.
+    name: 'mobilenetv2-12.onnx',
+    sha256: 'c0c3f76d93fa3fd6580652a45618618a220fced18babf65774ed169de0432ad5',
+    url: 'https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx',
+    license: 'Apache-2.0 (ONNX Model Zoo)',
+    minBytes: 10_000_000,
   },
 ];
 
@@ -45,11 +57,15 @@ for (const m of MODELS) {
     console.log(`have ${m.name}`);
   }
   const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+  const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+  if (sha256 !== m.sha256) {
+    throw new Error(`${m.name}: sha256 ${sha256} does not match pinned ${m.sha256}`);
+  }
   manifest[m.name] = {
     url: m.url,
     license: m.license,
     size: bytes.length,
-    sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+    sha256,
   };
 }
 await Bun.write(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
