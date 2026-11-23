@@ -261,25 +261,30 @@ await Promise.all(
     if ((await p.exited) !== 0) throw new Error(`shard ${k} failed`);
   })
 );
-// Merge: concatenate in shard order.
-const metas: any[] = [];
-const bins: Float32Array[] = [];
-let off = 0;
+// Merge back into input order (shard k holds images k, k + procs, ...), so
+// the dump is identical whatever --procs is.
+const shards: { images: any[]; bin: Float32Array }[] = [];
 for (let k = 0; k < procs; k++) {
   const base = join(OUT, `${name}.shard${k}`);
   const m = JSON.parse(await readFile(base + '.json', 'utf8'));
-  for (const im of m.images) metas.push({ ...im, off: im.off + off });
-  const b = new Float32Array(await Bun.file(base + '.bin').arrayBuffer());
-  off += b.length / DIM;
-  bins.push(b);
+  shards.push({
+    images: m.images,
+    bin: new Float32Array(await Bun.file(base + '.bin').arrayBuffer()),
+  });
   await rm(base + '.json');
   await rm(base + '.bin');
 }
-const all = new Float32Array(off * DIM);
-let p = 0;
-for (const b of bins) {
-  all.set(b, p);
-  p += b.length;
+const total = shards.reduce((s, x) => s + x.bin.length, 0);
+const all = new Float32Array(total);
+const metas: any[] = [];
+let off = 0;
+const count = shards.reduce((s, x) => s + x.images.length, 0);
+for (let i = 0; i < count; i++) {
+  const sh = shards[i % procs];
+  const im = sh.images[Math.floor(i / procs)];
+  all.set(sh.bin.subarray(im.off * DIM, (im.off + im.n) * DIM), off * DIM);
+  metas.push({ ...im, off });
+  off += im.n;
 }
 await Bun.write(join(OUT, `${name}.bin`), all);
 await Bun.write(
