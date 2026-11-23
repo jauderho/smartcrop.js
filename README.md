@@ -8,6 +8,58 @@ It can be used in the browser, in node or via a CLI.
 ![Example](https://29a.ch/sandbox/2014/smartcrop/example.jpg)
 Image: [https://www.flickr.com/photos/endogamia/5682480447/](https://www.flickr.com/photos/endogamia/5682480447) by Leon F. Cabeiro (N. Feans), licensed under CC-BY-2.0
 
+## What's better in 3.0
+
+The default crop picker is now a small model trained on human-rated crops.
+It ranks and picks crops the way people do far more often than the original
+algorithm. These numbers come from held-out benchmark test sets that were never used to train or
+tune anything (details in [Results](#results)):
+
+| measure (higher is better)               | original 2.x | 3.0 default (pure JS) | 3.0 + local faces, saliency & CNN |
+| ---------------------------------------- | -----------: | --------------------: | --------------------------------: |
+| GAICD: ranking agrees with people (SRCC) |        0.369 |      0.623 (**1.7×**) |                  0.795 (**2.2×**) |
+| GAICD: best pick is in the human top 5   |        22.4% |      48.0% (**2.1×**) |                  54.0% (**2.4×**) |
+| FCDB: overlap with the human crop (IoU)  |        0.718 |         0.744 (+3.6%) |                     0.769 (+7.1%) |
+| FLMS: overlap with the human crop (IoU)  |        0.918 |          0.917 (same) |                     0.931 (+1.4%) |
+
+The original algorithm ranked crops worse than always cropping the centre
+(GAICD SRCC 0.432); the new default does not. The cost: the learned scorer is
+about 10× slower (roughly 90 ms against 9 ms per image in Node), and
+`PRESETS.classic` still gives the old crops exactly.
+
+### Before and after
+
+Sample photos from the repository's test images (`examples/images`), cropped
+with the original algorithm (red, dashed), the 3.0 default (green, solid) and
+the default plus the optional local face and saliency plug-ins (blue, dotted).
+They were picked from the sample images where the crops differ most,
+including one where the default does worse. Regenerate them with
+`bun bench/readme-figures.ts`.
+
+**16:9 banner: the original frames empty corridor; 3.0 finds the person.**
+![Fishing: classic vs learned crops](docs/img/compare-28155975-1_7778.jpg)
+<sub>"Fishing" by John Nathaniel Calvara ([500px](http://500px.com/photo/28155975))</sub>
+
+**16:9 banner: the original fills the frame with shoes; 3.0 keeps the seller.**
+![The Shoe Seller: classic vs learned crops](docs/img/compare-65144887-1_7778.jpg)
+<sub>"The Shoe Seller" by Tamal Mitra ([500px](http://500px.com/photo/65144887))</sub>
+
+**Square thumbnail: the original drifts to the branches; 3.0 keeps the couple and the sun.**
+![Lovers: classic vs learned crops](docs/img/compare-65210163-1.jpg)
+<sub>"Lovers" by Photo KWest ([500px](http://500px.com/photo/65210163))</sub>
+
+**16:9 banner: the original picks the splash; 3.0 moves to the runner's legs, and the plug-ins frame the whole runner.**
+![Mile Run Race: classic vs learned crops](docs/img/compare-65309527-1_7778.jpg)
+<sub>"Mile Run Race" by Tim Barnhart ([500px](http://500px.com/photo/65309527))</sub>
+
+**16:9 banner: the pure-JS default settles on the hands; the face plug-in brings back the face.**
+![Joshua Reid: classic vs learned crops](docs/img/compare-65155627-1_7778.jpg)
+<sub>"Joshua Reid" by Jeremy Meier ([500px](http://500px.com/photo/65155627))</sub>
+
+**16:9 banner, a miss: the default loses most of the flowers; the saliency plug-in recovers them.**
+![All for one: classic vs learned crops](docs/img/compare-64948093-1_7778.jpg)
+<sub>"All for one.. and one for all!" by Sherazade Curfew Ali ([500px](http://500px.com/photo/64948093))</sub>
+
 ## Demos
 
 - [Smartcrop.js Test Suite](https://29a.ch/sandbox/2014/smartcrop/examples/testsuite.html), contains over 100 images, **heavy**.
