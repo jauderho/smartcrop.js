@@ -17,18 +17,14 @@ if (!window.performance.now) {
 
 var processed = {};
 var options = { debug: true, width: 250, height: 250 };
-$.getJSON('images/images.json', function(images) {
+$.getJSON('images/images.json', function (images) {
   $('body').append(
-    images.map(function(image) {
+    images.map(function (image) {
       return $('<div>')
         .append($('<img>').attr('src', image.url))
         .append(
           $('<div class=testsuite-image-title>')
-            .append(
-              $('<a>')
-                .text(image.name)
-                .attr('href', image.href)
-            )
+            .append($('<a>').text(image.name).attr('href', image.href))
             .append(
               $('<span class=test-suite-image-attribution>').text(
                 ' by ' + image.attribution
@@ -42,25 +38,25 @@ $.getJSON('images/images.json', function(images) {
   var totalmpix = 0;
   var totalCrops = 0;
 
-  $('img').each(function() {
-    $(this).on('load', function() {
+  $('img').each(function () {
+    $(this).on('load', function () {
       window.setTimeout(
-        function() {
+        function () {
           var img = this;
           if (processed[img.src]) return;
           processed[img.src] = true;
           var t = performance.now();
-          smartcrop.crop(img, options, function(result) {
+          smartcrop.crop(img, options, function (result) {
             totalTime += (performance.now() - t) / 1e3;
-            totalmpix += img.naturalWidth * img.naturalHeight / 1e6;
+            totalmpix += (img.naturalWidth * img.naturalHeight) / 1e6;
             totalCrops++;
             $('#perf').text(
               'processed ' +
                 totalCrops +
                 ' images, ' +
-                Math.round(totalTime * 1000 / totalCrops) +
+                Math.round((totalTime * 1000) / totalCrops) +
                 ' ms/image, ' +
-                Math.round(100 * totalmpix / totalTime) / 100 +
+                Math.round((100 * totalmpix) / totalTime) / 100 +
                 ' mega pixel/s'
             );
             // console.log(img.src, result);
@@ -81,9 +77,7 @@ $.getJSON('images/images.json', function(images) {
               canvas.height
             );
 
-            $(img)
-              .after(canvas)
-              .after(debugDraw(result, true));
+            $(img).after(canvas).after(debugDraw(result, true));
             //  .parent()
             //  .append($('<pre>').text(JSON.stringify(crop.score)));
           });

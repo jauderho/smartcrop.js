@@ -1,0 +1,14 @@
+[fmt]
+singleQuote = true
+trailingComma = "es5"
+ignorePatterns = [
+  "bun.lock",
+  "examples/*.min.js",
+  "examples/*-min.js",
+  "examples/face-api.js",
+  "examples/face-api/**",
+  "examples/jquery.js",
+  "examples/q.js",
+  "examples/underscore.js",
+  "examples/images/**",
+]

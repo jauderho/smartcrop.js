@@ -24,7 +24,7 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-(function() {
+(function () {
   'use strict';
 
   var smartcrop = {};
@@ -68,10 +68,10 @@
     imageOperations: null,
     canvasFactory: defaultCanvasFactory,
     // Factory: defaultFactories,
-    debug: false
+    debug: false,
   };
 
-  smartcrop.crop = function(inputImage, options_, callback) {
+  smartcrop.crop = function (inputImage, options_, callback) {
     var options = extend({}, smartcrop.DEFAULTS, options_);
 
     if (options.aspect) {
@@ -91,7 +91,7 @@
     // open the image
     return iop
       .open(inputImage, options.input)
-      .then(function(image) {
+      .then(function (image) {
         // calculate desired crop dimensions based on the image size
         if (options.width && options.height) {
           scale = min(
@@ -120,13 +120,13 @@
               options.cropWidth = ~~(options.cropWidth * prescale);
               options.cropHeight = ~~(options.cropHeight * prescale);
               if (options.boost) {
-                options.boost = options.boost.map(function(boost) {
+                options.boost = options.boost.map(function (boost) {
                   return {
                     x: ~~(boost.x * prescale),
                     y: ~~(boost.y * prescale),
                     width: ~~(boost.width * prescale),
                     height: ~~(boost.height * prescale),
-                    weight: boost.weight
+                    weight: boost.weight,
                   };
                 });
               }
@@ -137,8 +137,8 @@
         }
         return image;
       })
-      .then(function(image) {
-        return iop.getData(image).then(function(data) {
+      .then(function (image) {
+        return iop.getData(image).then(function (data) {
           var result = analyse(options, data);
 
           var crops = result.crops || [result.topCrop];
@@ -157,7 +157,7 @@
 
   // Check if all the dependencies are there
   // todo:
-  smartcrop.isAvailable = function(options) {
+  smartcrop.isAvailable = function (options) {
     if (!smartcrop.Promise) return false;
 
     var canvasFactory = options ? options.canvasFactory : defaultCanvasFactory;
@@ -295,7 +295,7 @@
             x: x,
             y: y,
             width: cropWidth * scale,
-            height: cropHeight * scale
+            height: cropHeight * scale,
           });
         }
       }
@@ -309,7 +309,7 @@
       saturation: 0,
       skin: 0,
       boost: 0,
-      total: 0
+      total: 0,
     };
 
     var od = output.data;
@@ -481,7 +481,7 @@
       // Takes imageInput as argument
       // returns an object which has at least
       // {width: n, height: n}
-      open: function(image) {
+      open: function (image) {
         // Work around images scaled in css by drawing them onto a canvas
         var w = image.naturalWidth || image.width;
         var h = image.naturalHeight || image.height;
@@ -502,8 +502,8 @@
         return smartcrop.Promise.resolve(c);
       },
       // Takes an image (as returned by open), and changes it's size by resampling
-      resample: function(image, width, height) {
-        return Promise.resolve(image).then(function(image) {
+      resample: function (image, width, height) {
+        return Promise.resolve(image).then(function (image) {
           var c = canvasFactory(~~width, ~~height);
           var ctx = c.getContext('2d');
 
@@ -521,13 +521,13 @@
           return smartcrop.Promise.resolve(c);
         });
       },
-      getData: function(image) {
-        return Promise.resolve(image).then(function(c) {
+      getData: function (image) {
+        return Promise.resolve(image).then(function (c) {
           var ctx = c.getContext('2d');
           var id = ctx.getImageData(0, 0, c.width, c.height);
           return new ImgData(c.width, c.height, id.data);
         });
-      }
+      },
     };
   }
   smartcrop._canvasImageOperations = canvasImageOperations;
@@ -579,7 +579,7 @@
 
   // Amd
   if (typeof define !== 'undefined' && define.amd)
-    define(function() {
+    define(function () {
       return smartcrop;
     });
   // Common js

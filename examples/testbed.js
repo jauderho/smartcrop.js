@@ -1,21 +1,21 @@
-(function() {
+(function () {
   var canvas = $('canvas')[0];
   var form = document.forms[0];
   var ctx = canvas.getContext('2d');
   var img;
 
   $('html')
-    .on('dragover', function(e) {
+    .on('dragover', function (e) {
       e.preventDefault();
       return false;
     })
-    .on('drop', function(e) {
+    .on('drop', function (e) {
       var files = e.originalEvent.dataTransfer.files;
       handleFiles(files);
       return false;
     });
 
-  $('input[type=file]').change(function() {
+  $('input[type=file]').change(function () {
     handleFiles(this.files);
   });
 
@@ -28,7 +28,7 @@
       ) {
         var reader = new FileReader();
         // Note: addEventListener doesn't work in Google Chrome for this event
-        reader.onload = function(evt) {
+        reader.onload = function (evt) {
           load(evt.target.result);
         };
         reader.readAsDataURL(file);
@@ -40,24 +40,22 @@
 
   $('input[type=range]').on(
     'input',
-    _.debounce(function() {
-      $(this)
-        .next('.value')
-        .text($(this).val());
+    _.debounce(function () {
+      $(this).next('.value').text($(this).val());
       run();
     }, 500)
   );
 
   $('input[type=radio], input[type=checkbox]').on(
     'change',
-    _.debounce(function() {
+    _.debounce(function () {
       run();
     })
   );
 
   function load(src) {
     img = new Image();
-    img.onload = function() {
+    img.onload = function () {
       run();
     };
     img.src = src;
@@ -70,21 +68,21 @@
       height: form.height.value * 1,
       minScale: form.minScale.value * 1,
       ruleOfThirds: form.ruleOfThirds.checked,
-      debug: true
+      debug: true,
     };
 
     var faceDetection = $('input[name=faceDetection]:checked', form).val();
     var analyzeOptions = analyze.bind(this, options);
 
     switch (faceDetection) {
-    case 'opencv':
-      faceDetectionOpenCV(options, analyzeOptions);
-      break;
-    case 'face-api':
-      faceDetectionFaceAPI(options, analyzeOptions);
-      break;
-    default:
-      analyzeOptions();
+      case 'opencv':
+        faceDetectionOpenCV(options, analyzeOptions);
+        break;
+      case 'face-api':
+        faceDetectionFaceAPI(options, analyzeOptions);
+        break;
+      default:
+        analyzeOptions();
     }
   }
 
@@ -100,42 +98,42 @@
     canvas.height = ~~(height * scale);
     canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
     var result = document.createElement('img');
-    result.onload = function() {
+    result.onload = function () {
       callback(result, scale);
     };
     result.src = canvas.toDataURL();
   }
 
-  var getFaceAPIDetector = _.memoize(function() {
+  var getFaceAPIDetector = _.memoize(function () {
     return faceapi.nets.tinyFaceDetector.loadFromUri('face-api');
   });
 
   function faceDetectionFaceAPI(options, callback) {
     getFaceAPIDetector()
       .then(
-        function() {
+        function () {
           return faceapi.tinyFaceDetector(img);
         },
-        function(err) {
+        function (err) {
           console.error(err);
           alert('Could not load models');
         }
       )
       .then(
-        function(faces) {
-          options.boost = faces.map(function(face) {
+        function (faces) {
+          options.boost = faces.map(function (face) {
             var box = face.box;
             return {
               x: box.x,
               y: box.y,
               width: box.width,
               height: box.height,
-              weight: 1.0
+              weight: 1.0,
             };
           });
           callback(options);
         },
-        function(err) {
+        function (err) {
           console.error(err);
           alert('could not detectAllFaces');
         }
@@ -143,7 +141,7 @@
   }
 
   function faceDetectionOpenCV(options, callback) {
-    prescaleImage(img, 768, function(img, scale) {
+    prescaleImage(img, 768, function (img, scale) {
       var src = cv.imread(img);
       var gray = new cv.Mat();
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
@@ -163,7 +161,7 @@
           y: face.y / scale,
           width: face.width / scale,
           height: face.height / scale,
-          weight: 1.0
+          weight: 1.0,
         });
       }
       src.delete();
@@ -184,9 +182,9 @@
     $('.crops')
       .empty()
       .append(
-        _.sortBy(result.crops, function(c) {
+        _.sortBy(result.crops, function (c) {
           return -c.score.total;
-        }).map(function(crop) {
+        }).map(function (crop) {
           return $('<p>')
             .text(
               'Score: ' +
@@ -197,14 +195,14 @@
                 crop.y
             )
             .hover(
-              function() {
+              function () {
                 drawCrop(crop);
               },
-              function() {
+              function () {
                 drawCrop(selectedCrop);
               }
             )
-            .click(function() {
+            .click(function () {
               selectedCrop = crop;
               drawCrop(selectedCrop);
             })
@@ -213,9 +211,7 @@
       );
 
     drawCrop(selectedCrop);
-    $('#debug')
-      .empty()
-      .append(debugDraw(result, true));
+    $('#debug').empty().append(debugDraw(result, true));
   }
 
   function drawCrop(crop) {
@@ -227,12 +223,12 @@
     ctx.strokeRect(crop.x, crop.y, crop.width, crop.height);
   }
 
-  window.openCvReady = function() {
+  window.openCvReady = function () {
     console.log('opencv code ready');
     loadCascade(
       'haarcascade_frontalface_default.xml',
       'https://unpkg.com/opencv.js@1.2.1/tests/haarcascade_frontalface_default.xml',
-      function() {
+      function () {
         console.log('opencv ready');
         document.querySelector('.opencv-loading input').disabled = false;
         document.querySelector('.opencv-loading').className = '';
@@ -244,7 +240,7 @@
     var request = new XMLHttpRequest();
     request.open('GET', url, true);
     request.responseType = 'arraybuffer';
-    request.onload = function() {
+    request.onload = function () {
       if (request.readyState === 4) {
         if (request.status === 200) {
           var data = new Uint8Array(request.response);

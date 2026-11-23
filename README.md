@@ -22,7 +22,7 @@ Image: [https://www.flickr.com/photos/endogamia/5682480447/](https://www.flickr.
 ```javascript
 // you pass in an image as well as the width & height of the crop you
 // want to optimize.
-smartcrop.crop(image, { width: 100, height: 100 }).then(function(result) {
+smartcrop.crop(image, { width: 100, height: 100 }).then(function (result) {
   console.log(result);
 });
 ```
@@ -44,7 +44,6 @@ Smarcrop requires support for [Promises](http://caniuse.com/#feat=promises),
 use a [polyfill](https://github.com/taylorhakes/promise-polyfill) for unsupported browsers or set `smartcrop.Promise` to your favorite promise implementation
 (I recommend [bluebird](http://bluebirdjs.com/)).
 
-
 ## Consider avoiding crops using dont-crop
 
 If you are interested in using smartcrop.js to crop your images you should also consider to avoid cropping them by using [dont-crop](https://github.com/jwagner/dont-crop/).
@@ -65,7 +64,7 @@ The [smartcrop-cli](https://github.com/jwagner/smartcrop-cli) can be used as an 
 
 While _smartcrop.js_ is a small personal project it is currently being used on high traffic production sites.
 It has a basic set of automated tests and a test coverage of close to 100%.
-The tests run in all modern browsers thanks to [saucelabs](https://saucelabs.com/).
+The tests run with `bun test` against a native canvas ([@napi-rs/canvas](https://github.com/Brooooooklyn/canvas)).
 If in any doubt the code is short enough to perform a quick review yourself.
 
 ## Algorithm Overview
@@ -190,11 +189,20 @@ Note that the impact the boost has is proportional to it's weight and area.
 
 ## Tests
 
-You can run the tests using `grunt test`. Alternatively you can also just run grunt (the default task) and open <http://localhost:8000/test/.>
+Development uses [bun](https://bun.sh):
+
+```sh
+bun install
+bun test        # unit tests
+bun check       # type check
+bun run lint    # eslint
+bun fmt         # format
+bun run start   # serve the examples at http://localhost:8000
+```
 
 ## Benchmark
 
-There are benchmarks for both the browser (test/benchmark.html) and node (node test/benchmark-node.js [requires node-canvas])
+There are benchmarks for both the browser (test/benchmark.html) and bun (`bun run bench`)
 both powered by [benchmark.js](http://benchmarkjs.com).
 
 If you just want some rough numbers: It takes **< 20 ms** to find a **square crop** of a **640x427px** picture on an i7.
@@ -218,9 +226,11 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 ## Version history
 
 ### 2.0.5
+
 Fix `TS1046: Top-level declarations in .d.ts files must start with either a 'declare' or 'export' modifier.`.
 
 ### 2.0.4
+
 Typescript type definitions.
 
 ### 2.0.2

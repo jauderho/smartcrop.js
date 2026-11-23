@@ -1,5 +1,5 @@
 /* global jQuery, Q */
-jQuery(function($) {
+jQuery(function ($) {
   var transitionend =
     'transitionend webkitTransitionEnd oTransitionEnd MSTransitionEnd';
 
@@ -17,10 +17,10 @@ jQuery(function($) {
     var d = Q.defer();
     var i = new Image();
 
-    i.onload = function() {
+    i.onload = function () {
       d.resolve(i);
     };
-    i.onerror = function(e) {
+    i.onerror = function (e) {
       d.reject(e);
     };
     i.src = src;
@@ -41,32 +41,29 @@ jQuery(function($) {
       i = (i + 1) % images.length;
     }
 
-    images = _.chain(images)
-      .shuffle()
-      .head(10)
-      .value();
+    images = _.chain(images).shuffle().head(10).value();
 
     Q.all(
-      images.map(function(i) {
-        return loadImage(i.url).then(function(img) {
+      images.map(function (i) {
+        return loadImage(i.url).then(function (img) {
           i.img = img;
           var options = {
             width: width * 0.1,
             height: height * 0.1,
-            ruleOfThirds: false
+            ruleOfThirds: false,
           };
           return Q.all([
             smartcrop(
               img,
               _.extend({ maxScale: 0.8, minScale: 0.7 }, options)
-            ).then(function(result) {
+            ).then(function (result) {
               i.from = result;
             }),
-            smartcrop(img, _.extend({ minScale: 1 }, options)).then(function(
-              result
-            ) {
-              i.to = result;
-            })
+            smartcrop(img, _.extend({ minScale: 1 }, options)).then(
+              function (result) {
+                i.to = result;
+              }
+            ),
           ]);
         });
       })
@@ -84,7 +81,7 @@ jQuery(function($) {
         '-webkit-transform': t,
         transform: t,
         '-webkit-transform-origin': '0 0',
-        'transform-origin': '0 0'
+        'transform-origin': '0 0',
       };
     }
 
@@ -109,13 +106,8 @@ jQuery(function($) {
       last.css('opacity', '0');
     }
     slide.empty().append(img);
-    $(img)
-      .css(transform(from.topCrop))
-      .css('opacity', 1)
-      .width(); // reflow
-    $(img)
-      .on(transitionend, _.once(done))
-      .css(transform(to.topCrop));
+    $(img).css(transform(from.topCrop)).css('opacity', 1).width(); // reflow
+    $(img).on(transitionend, _.once(done)).css(transform(to.topCrop));
 
     img.onerror = done;
     img.src = image.url;
