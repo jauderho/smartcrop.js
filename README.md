@@ -1,6 +1,6 @@
 # smartcrop.js [Forked]
 
-![example workflow](https://github.com/jwagner/smartcrop.js/actions/workflows/tests.yml/badge.svg)
+[![Tests](https://github.com/jauderho/smartcrop.js/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/jauderho/smartcrop.js/actions/workflows/tests.yml)
 
 Smartcrop.js implements an algorithm to find good crops for images.
 It can be used in the browser, in node or via a CLI.
