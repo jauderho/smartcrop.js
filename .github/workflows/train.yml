@@ -1,0 +1,373 @@
+name: Train
+
+# Retrains the learned crop scorer on a GitHub runner so that training never
+# depends on one laptop. Manual only: never on push, pull_request or schedule.
+#
+# Data policy (see docs/training-efficiency.md):
+#   * GAICD, FCDB and FLMS are downloaded fresh in every run, used inside the
+#     one job that downloaded them, and die with the runner. They are never put
+#     in actions/cache or in artifacts, and neither is anything derived from
+#     them (plug-in caches, feature dumps).
+#   * Only the ONNX models (pinned sha256), bun's package cache, and the trained
+#     weights + metrics are cached or uploaded.
+#   * Nothing is committed or pushed. The owner reviews the artifact, then
+#     commits src/learned-cnn-weights.ts (or learned-weights.ts) and
+#     src/weights-manifest.json by hand.
+#
+# Shape: one job. Estimated 1.5 to 3 h on a 4 vCPU runner (limit 6 h): fetch,
+# plug-in inference on 4 processes, feature dump, K ensemble members trained in
+# parallel (one process each), combine, validation gate, shrink. Each stage is
+# minutes to tens of minutes, so no intra-training checkpoint is needed; if the
+# job fails, re-running it repeats at most one run (the weights cache below
+# makes a repeat of a *finished* configuration free).
+
+on:
+  workflow_dispatch:
+    inputs:
+      cnn:
+        description: 'cnn pooling grid K (3 = shipped cnn head, 0 = hand-feature model only)'
+        default: '3'
+        required: true
+      hidden:
+        description: 'hidden layer sizes, comma separated'
+        default: '32,32'
+        required: true
+      l2:
+        description: 'L2 weight decay'
+        default: '3e-3'
+        required: true
+      lr:
+        description: 'learning rate'
+        default: '2e-3'
+        required: true
+      epochs:
+        description: 'epochs'
+        default: '30'
+        required: true
+      fcdb:
+        description: 'weight of the FCDB-train windows in the loss (0 = off, no holdout)'
+        default: '0.5'
+        required: true
+      ppi:
+        description: 'training pairs per image per epoch'
+        default: '64'
+        required: true
+      lambda:
+        description: 'LambdaRank pair weighting mix (0 = off)'
+        default: '0'
+        required: true
+      ema:
+        description: 'EMA decay of the weights (0 = off)'
+        default: '0'
+        required: true
+      cosine:
+        description: 'cosine learning-rate decay'
+        type: boolean
+        default: false
+      ensemble:
+        description: 'ensemble members (seeds seed .. seed+N-1, trained in parallel)'
+        default: '1'
+        required: true
+      seed:
+        description: 'first seed'
+        default: '1'
+        required: true
+      refit_pca:
+        description: 'refit the cnn PCA projection on GAICD-train (default: reuse the shipped one)'
+        type: boolean
+        default: false
+      gate_margin:
+        description: 'new model must beat the shipped one by at least this much (val SRCC + holdout IoU)'
+        default: '0'
+        required: true
+      parallel:
+        description: 'training processes at once (about 2 GB RAM each)'
+        default: '4'
+        required: true
+      force:
+        description: 'retrain even if weights for this fingerprint are cached'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    permissions:
+      contents: read
+      actions: write # delete a stale weights cache entry on force
+    env:
+      IN_CNN: ${{ inputs.cnn }}
+      IN_HIDDEN: ${{ inputs.hidden }}
+      IN_L2: ${{ inputs.l2 }}
+      IN_LR: ${{ inputs.lr }}
+      IN_EPOCHS: ${{ inputs.epochs }}
+      IN_FCDB: ${{ inputs.fcdb }}
+      IN_PPI: ${{ inputs.ppi }}
+      IN_LAMBDA: ${{ inputs.lambda }}
+      IN_EMA: ${{ inputs.ema }}
+      IN_COSINE: ${{ inputs.cosine }}
+      IN_ENSEMBLE: ${{ inputs.ensemble }}
+      IN_SEED: ${{ inputs.seed }}
+      IN_REFIT: ${{ inputs.refit_pca }}
+      IN_MARGIN: ${{ inputs.gate_margin }}
+      IN_PARALLEL: ${{ inputs.parallel }}
+      IN_FORCE: ${{ inputs.force }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate inputs
+        run: |
+          set -eu
+          re='^[0-9.,e+-]+$'
+          for v in IN_CNN IN_HIDDEN IN_L2 IN_LR IN_EPOCHS IN_FCDB IN_PPI IN_LAMBDA IN_EMA IN_ENSEMBLE IN_SEED IN_MARGIN IN_PARALLEL; do
+            val="${!v}"
+            if ! printf '%s' "$val" | grep -Eq "$re"; then
+              echo "::error::$v='$val' is not a plain number"; exit 1
+            fi
+          done
+          [ "$IN_ENSEMBLE" -ge 1 ] && [ "$IN_ENSEMBLE" -le 16 ] || { echo "::error::ensemble must be 1..16"; exit 1; }
+          [ "$IN_PARALLEL" -ge 1 ] && [ "$IN_PARALLEL" -le 4 ] || { echo "::error::parallel must be 1..4 (4 vCPU, 16 GB)"; exit 1; }
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Cache bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Fingerprint
+        id: fp
+        run: |
+          set -eu
+          config=$(jq -cn \
+            --arg cnn "$IN_CNN" --arg hidden "$IN_HIDDEN" --arg l2 "$IN_L2" --arg lr "$IN_LR" \
+            --arg epochs "$IN_EPOCHS" --arg fcdb "$IN_FCDB" --arg ppi "$IN_PPI" \
+            --arg lambda "$IN_LAMBDA" --arg ema "$IN_EMA" --arg ensemble "$IN_ENSEMBLE" \
+            --arg seed "$IN_SEED" --arg cosine "$IN_COSINE" --arg refit "$IN_REFIT" \
+            '{cnn:($cnn|tonumber), hidden:$hidden, l2:($l2|tonumber), lr:($lr|tonumber),
+              epochs:($epochs|tonumber), fcdb:($fcdb|tonumber), ppi:($ppi|tonumber),
+              lambda:($lambda|tonumber), ema:($ema|tonumber), ensemble:($ensemble|tonumber),
+              seed:($seed|tonumber), cosine:($cosine=="true"), refitPca:($refit=="true")}')
+          fp=$(bun scripts/weights-fingerprint.ts --config "$config")
+          {
+            echo "config=$config"
+            echo "fp=$fp"
+            echo "short=${fp:0:12}"
+          } >> "$GITHUB_OUTPUT"
+          echo "fingerprint $fp"
+          echo "$config"
+
+      - name: Restore trained weights for this fingerprint
+        id: wcache
+        if: ${{ !inputs.force }}
+        uses: actions/cache/restore@v4
+        with:
+          path: out/weights
+          key: weights-${{ steps.fp.outputs.fp }}
+
+      - name: Weights already trained for this fingerprint
+        if: steps.wcache.outputs.cache-hit == 'true'
+        run: |
+          {
+            echo "### Reused cached weights"
+            echo "Fingerprint \`${{ steps.fp.outputs.fp }}\` was trained before; nothing was retrained (set **force** to retrain)."
+            echo
+            cat out/weights/gate.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- everything below runs only when there is nothing cached ----------
+      - name: Cache ONNX models (keyed on the pinned sha256 values)
+        id: modelkey
+        if: steps.wcache.outputs.cache-hit != 'true'
+        run: |
+          key=$(grep -oE "sha256: '[0-9a-f]{64}'" scripts/fetch-models.ts | sort | sha256sum | cut -d' ' -f1)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore ONNX models
+        if: steps.wcache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: bench/models
+          key: onnx-models-${{ steps.modelkey.outputs.key }}
+
+      - name: Fetch models (verifies the pinned sha256)
+        if: steps.wcache.outputs.cache-hit != 'true'
+        run: bun scripts/fetch-models.ts
+
+      - name: Download datasets (fresh; never cached)
+        if: steps.wcache.outputs.cache-hit != 'true'
+        timeout-minutes: 150
+        run: |
+          df -h .
+          bun scripts/fetch-datasets.ts gaicd fcdb flms --clean-archives --concurrency 4
+          df -h .
+          du -sh bench/datasets/*
+
+      - name: Check the downloaded datasets are complete
+        if: steps.wcache.outputs.cache-hit != 'true'
+        run: |
+          # The gate compares against weights trained on the full splits; dead
+          # Flickr links would silently change the data. Loosen on purpose only.
+          bun -e "
+          const n = async (p, k) => { const c = {}; for (const a of await Bun.file(p).json()) c[a[k]] = (c[a[k]] || 0) + 1; return c };
+          const g = await n('bench/datasets/gaicd/candidates.json', 'split');
+          const f = await n('bench/datasets/fcdb/annotations.json', 'split');
+          console.log('gaicd', g, 'fcdb', f);
+          if (g.train !== 2636 || g.val !== 200 || f.train !== 1369) { console.error('dataset splits are incomplete'); process.exit(1) }"
+
+      - name: PCA projection of the cnn head
+        if: steps.wcache.outputs.cache-hit != 'true' && inputs.cnn != '0'
+        run: |
+          if [ "$IN_REFIT" = "true" ]; then
+            bun bench/learned/cnn-pca.ts
+          else
+            bun bench/learned/projection-from-shipped.ts
+          fi
+
+      - name: Plug-in inference (faces, saliency, cnn), 4 processes x 1 thread
+        if: steps.wcache.outputs.cache-hit != 'true' && inputs.cnn != '0'
+        timeout-minutes: 120
+        env:
+          SMARTCROP_ORT_THREADS: '1'
+        run: |
+          # shellcheck disable=SC2086,SC2016
+          set -eu
+          for job in "gaicd train" "gaicd val" "fcdb train"; do
+            set -- $job
+            for k in 0 1 2 3; do
+              bun bench/precompute.ts "$1" --split "$2" --shard "$k/4" &
+            done
+            wait
+          done
+          du -sh bench/out/cache
+
+      - name: Feature dumps
+        if: steps.wcache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        run: |
+          # shellcheck disable=SC2086,SC2016
+          set -eu
+          if [ "$IN_CNN" != "0" ]; then
+            with="--with faces,saliency,cnn --cnnk $IN_CNN"
+          else
+            with=""
+          fi
+          for job in "gaicd train" "gaicd val" "fcdb train"; do
+            set -- $job
+            bun bench/learned/dump.ts --dataset "$1" --split "$2" $with --procs 4 --force
+          done
+          # raw images and plug-in caches are not needed past this point
+          rm -rf bench/out/cache bench/datasets
+          du -sh bench/out/learned; df -h .
+
+      - name: Train ensemble members in parallel
+        if: steps.wcache.outputs.cache-hit != 'true'
+        timeout-minutes: 240
+        run: |
+          # shellcheck disable=SC2086,SC2016
+          set -eu
+          mkdir -p out/members out/weights
+          flags="--hidden $IN_HIDDEN --l2 $IN_L2 --lr $IN_LR --epochs $IN_EPOCHS --fcdb $IN_FCDB --ppi $IN_PPI --lambda $IN_LAMBDA --ema $IN_EMA"
+          [ "$IN_CNN" != "0" ] && flags="$flags --cnn $IN_CNN"
+          [ "$IN_COSINE" = "true" ] && flags="$flags --cosine"
+          export TRAIN_FLAGS="$flags"
+          echo "train.ts $flags"
+          seq "$IN_SEED" $((IN_SEED + IN_ENSEMBLE - 1)) | xargs -P "$IN_PARALLEL" -I{} sh -c \
+            'bun bench/learned/train.ts $TRAIN_FLAGS --seed {} --write --out out/members/m{}.json > out/members/m{}.log 2>&1 || { echo "member {} failed"; tail -20 out/members/m{}.log; exit 1; }'
+          grep -h '^hidden=' out/members/m*.log
+
+      - name: Combine members
+        if: steps.wcache.outputs.cache-hit != 'true'
+        run: |
+          # shellcheck disable=SC2086,SC2016
+          set -eu
+          members=$(seq "$IN_SEED" $((IN_SEED + IN_ENSEMBLE - 1)) | sed 's|.*|out/members/m&.json|')
+          bun bench/learned/combine.ts out/weights/model-full.json $members
+
+      - name: Validation gate (new vs shipped, validation data only)
+        id: gate
+        if: steps.wcache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          set -eu
+          bun bench/learned/gate.ts out/weights/model-full.json --cnn "$IN_CNN" --fcdb "$IN_FCDB" \
+            --margin "$IN_MARGIN" --report out/weights/gate.json --markdown out/weights/gate.md
+
+      - name: Shrink to packed weights and write the manifest
+        if: steps.wcache.outputs.cache-hit != 'true'
+        run: |
+          set -eu
+          if [ "$IN_CNN" != "0" ]; then w=learned-cnn-weights.ts; else w=learned-weights.ts; fi
+          bun bench/learned/shrink.ts out/weights/model-full.json --out "out/weights/$w" | tee out/weights/shrink.log
+          cp src/weights-manifest.json out/weights/weights-manifest.json 2>/dev/null || true
+          bun scripts/weights-fingerprint.ts --write --config '${{ steps.fp.outputs.config }}' \
+            --weights "out/weights/$w" --manifest out/weights/weights-manifest.json \
+            --metrics "$(cat out/weights/gate.json)"
+          cp out/members/*.log out/weights/ 2>/dev/null || true
+          echo '${{ steps.fp.outputs.config }}' > out/weights/config.json
+          echo "${{ steps.fp.outputs.fp }}" > out/weights/fingerprint.txt
+
+      - name: Job summary
+        if: always() && steps.wcache.outputs.cache-hit != 'true'
+        run: |
+          # shellcheck disable=SC2086,SC2016
+          {
+            echo "### Training result"
+            echo "Fingerprint \`${{ steps.fp.outputs.fp }}\`"
+            echo
+            echo '```json'; cat out/weights/config.json 2>/dev/null || echo '${{ steps.fp.outputs.config }}'; echo '```'
+            echo
+            cat out/weights/gate.md 2>/dev/null || echo "gate did not run"
+            echo
+            echo "Members:"; echo '```'; grep -h '^hidden=' out/members/m*.log 2>/dev/null || true; echo '```'
+            echo
+            echo "Review the artifact, then commit the packed weights and \`weights-manifest.json\` by hand."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check that the outputs hold only weights and metrics
+        if: always()
+        run: |
+          set -eu
+          [ -d out/weights ] || exit 0
+          bad=$(find out/weights -type f ! \( -name '*.json' -o -name '*.ts' -o -name '*.md' -o -name '*.log' -o -name '*.txt' \) -print)
+          big=$(find out/weights -type f -size +20M -print)
+          if [ -n "$bad$big" ]; then echo "::error::unexpected files in the output: $bad $big"; exit 1; fi
+
+      - name: Upload weights and metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-weights-${{ steps.fp.outputs.short }}
+          path: out/weights
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Drop a stale cache entry (force)
+        if: inputs.force && steps.gate.outcome == 'success'
+        run: gh cache delete "weights-${{ steps.fp.outputs.fp }}" || true
+
+      - name: Store weights in the cache (only if the gate passed)
+        if: steps.wcache.outputs.cache-hit != 'true' && steps.gate.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: out/weights
+          key: weights-${{ steps.fp.outputs.fp }}
+
+      - name: Fail the run when the gate failed
+        if: steps.gate.outcome == 'failure'
+        run: |
+          echo "::error::The new model does not beat the shipped one on validation (see the summary). The artifact is kept for inspection; it was not cached."
+          exit 1

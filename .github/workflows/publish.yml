@@ -12,7 +12,16 @@ permissions:
   contents: read
 
 jobs:
+  # Gate: the shipped learned weights must have been trained by the current
+  # training code (fails with a pointer to the Train workflow when stale).
+  weights-fresh:
+    uses: ./.github/workflows/weights-fresh.yml
+    permissions:
+      contents: read
+      actions: read
+
   publish:
+    needs: weights-fresh
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

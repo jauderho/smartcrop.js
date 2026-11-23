@@ -1,0 +1,42 @@
+name: Weights freshness
+
+# Fails when the shipped learned-scorer weights were not trained by the current
+# training code, dataset/model pins and config (see scripts/weights-fingerprint.ts
+# and src/weights-manifest.json). Call it from release/deploy workflows:
+#
+#   jobs:
+#     weights-fresh:
+#       uses: ./.github/workflows/weights-fresh.yml
+#       permissions: { contents: read, actions: read }
+#
+# The fix for a stale result is to run the "Train" workflow and commit the
+# weights and manifest it produces.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  weights-fresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - name: Compare the recorded fingerprint with the current one
+        run: bun scripts/weights-fingerprint.ts --check
+      - name: Point at the latest trained weights
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Shipped weights are stale"
+            echo "Run the **Train** workflow (Actions > Train > Run workflow), review its artifact, then commit the weights and \`src/weights-manifest.json\` it produced."
+            echo
+            echo "Latest successful Train runs (an artifact or cached model for the new fingerprint is there if the config matches):"
+            gh run list --workflow train.yml --status success --limit 3 \
+              --json url,createdAt,headSha --jq '.[] | "- \(.createdAt) \(.headSha[0:7]) \(.url)"' || true
+          } >> "$GITHUB_STEP_SUMMARY"
