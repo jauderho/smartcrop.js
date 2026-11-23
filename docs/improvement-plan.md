@@ -192,6 +192,45 @@ Open:
 - Acc1/5 stays below the 55 target. Learned CNN features (GAIC-style) are the likely route, which needs downloaded weights.
 - The pure-JS model sometimes loses a small subject, such as a person or the church in the examples. The +fs config fixes most of these.
 
+## Weight and selection experiments (2026-11-23)
+
+Trainer changes on the CNN head. All were selected on GAICD val and the
+FCDB-train holdout only. The selection score is val SRCC + holdout IoU; the
+shipped head scores 1.5852, and its rerun reproduces it exactly.
+
+| run                                | val SRCC | val Acc1/5 | holdout IoU | score  |
+| ---------------------------------- | -------- | ---------- | ----------- | ------ |
+| shipped (RankNet, linear LR decay) | 0.8072   | 55.0       | 0.7780      | 1.5852 |
+| LambdaRank weighting 0.5           | 0.8032   | 51.5       | 0.7769      | 1.5801 |
+| LambdaRank weighting 1             | 0.7881   | 47.5       | 0.7865      | 1.5746 |
+| EMA of weights (0.999)             | 0.8116   | 52.0       | 0.7741      | 1.5857 |
+| cosine LR                          | 0.8054   | 49.5       | 0.7754      | 1.5808 |
+| LambdaRank 0.5 + EMA + cosine      | 0.8059   | 51.5       | 0.7841      | 1.5900 |
+
+None beat the shipped head clearly, so it stays. The combined run's
+higher score comes from holdout IoU, while it loses 3.5 points of val Acc1/5. The top-focused
+LambdaRank loss lowered top-1 accuracy.
+
+**Consensus crop selection** (`consensus: T`, opt-in) returns the
+softmax-weighted mean box of the 64 best windows instead of the single
+argmax. It is the box-voting / weighted-box-fusion idea from object
+detection, applied to crop search; it is not a new algorithm.
+
+- T=0.2 was selected on the FCDB-train holdout: every subset improved, and
+  T=0.4 hurt people and faces.
+- It was then validated once on all held-out sets (1,345 images, paired,
+  10k bootstrap) with faces+saliency+CNN:
+  - FCDB test +0.0060 [0.0025, 0.0094];
+  - GAICD test (top-MOS boxes) +0.0124 [0.0097, 0.0152];
+  - FLMS -0.0029 [-0.0055, -0.0003];
+  - pooled +0.0051 [0.0034, 0.0068], 678 wins / 459 losses, sign test
+    p < 0.001.
+- Content subsets are all within noise.
+- With faces+saliency only it does nothing: FLMS +0.0005, holdout +0.0017.
+
+Recommendation: use `consensus: 0.2` together with the CNN head. It is a
+small but significant pooled gain, so it is opt-in.
+
 ## Sources
 
 Research surveys run 2026-11-22 (academic methods, production systems,
