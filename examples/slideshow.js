@@ -27,7 +27,7 @@ jQuery(function ($) {
     return d.promise;
   }
 
-  function smartcrop(img, options) {
+  function cropImage(img, options) {
     var d = Q.defer();
     smartcrop.crop(img, options, d.resolve.bind(d));
     return d.promise;
@@ -53,13 +53,13 @@ jQuery(function ($) {
             ruleOfThirds: false,
           };
           return Q.all([
-            smartcrop(
+            cropImage(
               img,
               _.extend({ maxScale: 0.8, minScale: 0.7 }, options)
             ).then(function (result) {
               i.from = result;
             }),
-            smartcrop(img, _.extend({ minScale: 1 }, options)).then(
+            cropImage(img, _.extend({ minScale: 1 }, options)).then(
               function (result) {
                 i.to = result;
               }
