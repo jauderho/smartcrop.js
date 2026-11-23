@@ -1421,7 +1421,7 @@ const DEFAULTS: Options = {
 };
 
 /**
- * Named option bundles. The learned scorer is the default since 4.0;
+ * Named option bundles. The learned scorer is the default since 3.0;
  * `classic` reproduces the original algorithm's crops exactly:
  * `crop(img, { ...PRESETS.classic, width, height })`. `next` is kept as an
  * alias of the default.

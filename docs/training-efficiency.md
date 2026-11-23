@@ -185,7 +185,7 @@ docs, tests, eval scripts, `parallel`, `gate_margin` and `force` are excluded.
 - Wiring: `.github/workflows/weights-fresh.yml` (`workflow_call` and
   `workflow_dispatch`) runs the check and, on failure, writes the stale message and
   links the latest successful Train runs to the job summary.
-  `publish.yml` now has `weights-fresh` as a job and `publish` `needs` it; its
+  `release.yml` (which replaced `publish.yml`) has `weights-fresh` as a job and `release` `needs` it; its
   trigger (manual only) and the disabled npm publishing are unchanged, and
   `scripts/release.sh` stays disabled. `tests.yml` is not gated (see risks).
 
@@ -212,7 +212,7 @@ config per dispatch.
 
 Decisions:
 
-1. Release gating: I gated only `publish.yml`. `tests.yml` (push and PR CI) is not
+1. Release gating: I gated only the release workflow (`release.yml`). `tests.yml` (push and PR CI) is not
    gated: it would turn every PR red until weights are retrained after any edit
    to a hashed file. Say if you want it there, perhaps as a non-blocking job.
 2. First manifest: there is none. The publish workflow will fail its gate until

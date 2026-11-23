@@ -1,0 +1,70 @@
+name: Release
+
+# Push a tag vX.Y.Z (matching package.json) to build, test, publish
+# @jauderho/smartcrop to npm with provenance, and create the GitHub release
+# with the built files attached.
+#
+# npm auth: add an NPM_TOKEN repository secret (an npm automation or granular
+# token with publish rights on @jauderho/smartcrop).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'existing tag to release (e.g. v3.0.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The shipped learned weights must match the current training code.
+  weights-fresh:
+    uses: ./.github/workflows/weights-fresh.yml
+    permissions:
+      contents: read
+      actions: read
+
+  release:
+    needs: weights-fresh
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # npm provenance
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - name: Tag matches package.json
+        run: |
+          v=$(node -p "require('./package.json').version")
+          [ "v$v" = "$TAG" ] || { echo "tag $TAG != package.json $v"; exit 1; }
+      - run: bun fmt --check
+      - run: bun --bun run lint
+      - run: bun check
+      - run: bun run build
+      - run: bun test
+      - name: Pack
+        run: |
+          npm pack
+          (cd dist && zip -r "../smartcrop-${TAG#v}-dist.zip" .)
+      - name: Publish to npm
+        run: npm publish --provenance --access public jauderho-smartcrop-*.tgz
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(awk "/^### ${TAG#v}\$/{f=1;next} /^### /{f=0} f" README.md)
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes "$notes" \
+            jauderho-smartcrop-*.tgz "smartcrop-${TAG#v}-dist.zip"

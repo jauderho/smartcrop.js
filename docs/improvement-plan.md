@@ -129,7 +129,7 @@ review by the website session.
 
 - **Rollout:** new behaviour ships as an opt-in preset during 3.x; current
   crops stay the default until the harness proves the new ones, then the
-  default flips in 4.0.
+  default flips in 3.0.0, the first npm release of the fork.
 - **Datasets:** FCDB, FLMS and GAICD are downloaded into a gitignored local
   folder for tuning and evaluation; never committed or redistributed.
 - **Skin detector:** default decided by measurement (harness plus a

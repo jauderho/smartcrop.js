@@ -1,0 +1,18 @@
+@jauderho/smartcrop
+Copyright (c) 2016 Jonas Wagner (original smartcrop.js)
+Copyright (c) 2026 Jauder Ho (learned scorer and fork changes)
+Licensed under the MIT License; see LICENSE.
+
+Learned scorer weights
+----------------------
+The default crop scorer ships trained weights (src/learned-weights.ts, bundled
+in dist/). They were trained on human crop ratings and annotations from these
+public research datasets:
+
+  - GAICD (Grid Anchor based Image Cropping Dataset), Zeng et al.
+  - FCDB (Flickr Cropping Dataset), Chen et al.
+
+The weights contain no images from these datasets. The datasets' own licence
+terms are not stated by their authors. If that matters for your use, check the
+dataset terms yourself, or use the original algorithm instead:
+smartcrop.crop(image, { ...smartcrop.PRESETS.classic, width, height }).

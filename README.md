@@ -32,9 +32,9 @@ Output:
 {topCrop: {x: 300, y: 200, height: 200, width: 200}}
 ```
 
-## Better crops: the learned scorer (4.0)
+## Better crops: the learned scorer (3.0)
 
-This fork adds a learned scorer, the default since 4.0, that picks crops people actually prefer. It
+This fork adds a learned scorer, the default since 3.0, that picks crops people actually prefer. It
 _handily_ beats the original algorithm, which on public benchmarks barely beat
 an always-centred crop.
 
@@ -203,8 +203,18 @@ detection. With the CNN head it was validated on 1,345 held-out images: IoU
 
 ## Download/ Installation
 
-This fork is not published to npm; the `smartcrop` package on npm is the original 2.x release.
-Download the built files from the [GitHub releases](https://github.com/jauderho/smartcrop.js/releases), or build them from source:
+This fork is published to npm as [`@jauderho/smartcrop`](https://www.npmjs.com/package/@jauderho/smartcrop)
+(the unscoped `smartcrop` package is the original 2.x release):
+
+```sh
+npm install @jauderho/smartcrop   # or: bun add @jauderho/smartcrop
+```
+
+```javascript
+import smartcrop from '@jauderho/smartcrop';
+```
+
+The built files are also attached to each [GitHub release](https://github.com/jauderho/smartcrop.js/releases), or build them from source:
 
 ```sh
 git clone https://github.com/jauderho/smartcrop.js.git
@@ -321,7 +331,7 @@ You may not use cross-domain images without [CORS](https://en.wikipedia.org/wiki
 
 ### cropOptions
 
-**minScale:** minimal scale of the crop rect, set to 1.0 to prevent smaller than necessary crops (lowers the risk of chopping things off).
+**minScale:** minimal scale of the crop rect, set to 1.0 to prevent smaller than necessary crops (lowers the risk of chopping things off). Defaults to 1.0 for the classic scorer and 0.4 for the learned scorer (the default), which may pick a tighter crop; crops that would need upscaling are never picked when `width`/`height` are given.
 
 **width:** width of the crop you want to use.
 
@@ -331,7 +341,7 @@ You may not use cross-domain images without [CORS](https://en.wikipedia.org/wiki
 
 **ruleOfThirds:** optional boolean if set to false it will turn off the rule of thirds composition weight.
 
-**scorer:** `'learned'` (default since 4.0; see [the learned scorer](#better-crops-the-learned-scorer-40)) or `'classic'` (the original algorithm, also `smartcrop.PRESETS.classic`). `PRESETS.next` is kept as an alias of the default.
+**scorer:** `'learned'` (default since 3.0; see [the learned scorer](#better-crops-the-learned-scorer-30)) or `'classic'` (the original algorithm, also `smartcrop.PRESETS.classic`). `PRESETS.next` is kept as an alias of the default.
 
 **importanceMap:** optional saliency or importance map `{ width, height, data }` (any size, values ≥ 0) used by the learned scorer and by `importanceMapWeight` in classic mode.
 
@@ -419,15 +429,13 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 
 ## Version history
 
-### 4.0.0 (unreleased)
-
-- Breaking: the learned crop scorer, trained on human-rated crops, is now the default. `PRESETS.classic` (`scorer: 'classic'`) keeps the original crops.
-- Optional local ONNX face, saliency and CNN-feature plug-ins (`plugins/onnx`), with pinned model checksums.
-- `result.position`, `candidates`, and opt-in classic terms (`luminance`, `centerWeight`, `textureDamping`, `saliencyWeight`, `borderPenalty`, `importanceMap`).
-- Benchmark, tuning and gallery tooling in `bench/`.
-
 ### 3.0.0
 
+- Published to npm as `@jauderho/smartcrop`.
+- Breaking: the learned crop scorer, trained on human-rated crops, is now the default. It is about 10x slower than the classic scorer (roughly 90 ms vs 9 ms per image in Node) and searches tighter crops (`minScale` 0.4). `PRESETS.classic` (`scorer: 'classic'`) keeps the original crops exactly.
+- Optional local ONNX face, saliency and CNN-feature plug-ins (`plugins/onnx`), with pinned model checksums. They live in the repository and are not part of the npm package yet.
+- `result.position`, `candidates`, and opt-in classic terms (`luminance`, `centerWeight`, `textureDamping`, `saliencyWeight`, `borderPenalty`, `importanceMap`).
+- Benchmark, tuning and gallery tooling in `bench/`.
 - TypeScript source (`src/smartcrop.ts`) and generated type definitions.
 - ES module, CommonJS and browser builds in `dist/` with a package.json `exports` map.
 - Removed the AMD module format and the root `smartcrop.js`.
@@ -466,3 +474,7 @@ It does not denote a finished product.
 ## License
 
 Copyright (c) 2018 Jonas Wagner, licensed under the MIT License (enclosed)
+
+Fork changes copyright (c) 2026 Jauder Ho, same licence. The learned scorer
+weights were trained on research datasets (GAICD, FCDB) whose licence terms are
+not stated; see [NOTICE](NOTICE).
