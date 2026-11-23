@@ -1,0 +1,41 @@
+name: Platform probe
+
+# Records every training input stage (decode, faces, saliency, cnn, features,
+# crops) on the repository's sample images on several runner types, so the
+# outputs can be compared with a laptop run:
+#   bun bench/platform-probe.ts --compare laptop.json probe-ubuntu-latest-t1.json
+# Uses examples/images only; no datasets are downloaded.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: ONNX models (pinned sha256)
+        uses: actions/cache@v4
+        with:
+          path: bench/models
+          key: onnx-models-${{ hashFiles('scripts/fetch-models.ts') }}
+      - run: bun scripts/fetch-models.ts
+      - name: CPU
+        run: (lscpu 2>/dev/null || sysctl -n machdep.cpu.brand_string) | head -20
+      - name: Probe, 1 ONNX thread (as the Train workflow)
+        run: SMARTCROP_ORT_THREADS=1 bun bench/platform-probe.ts --out probe-${{ matrix.os }}-t1.json
+      - name: Probe, default threads
+        run: bun bench/platform-probe.ts --out probe-${{ matrix.os }}-tdefault.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ matrix.os }}
+          path: probe-*.json
+          retention-days: 7
