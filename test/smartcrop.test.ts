@@ -5,6 +5,8 @@ import smartcrop, {
   type CropOptions,
   type CropResult,
 } from '../src/smartcrop';
+import { cnnContext, cnnDim, cnnFeatures, type FeatureMap } from '../src/cnn';
+import { FEATURE_COUNT, packModel } from '../src/learned';
 
 // Internal helpers are exposed on the module for testing.
 const internals = smartcrop;
@@ -336,5 +338,87 @@ describe('learned scorer', () => {
     );
     expect(f.length % 2).toBe(0);
     expect(f.every(Number.isFinite)).toBe(true);
+  });
+});
+
+describe('cnn deep features', () => {
+  const C = 4;
+  const K = 3;
+  const fm: FeatureMap = {
+    width: 12,
+    height: 8,
+    channels: C,
+    data: Float32Array.from(
+      { length: 12 * 8 * C },
+      (_, i) => Math.sin(i * 0.37) + (i % C)
+    ),
+  };
+  const D = FEATURE_COUNT + cnnDim(K, C);
+  // A fixed tiny head: D -> 4 -> 1.
+  const head = {
+    mean: new Array(D).fill(0),
+    std: new Array(D).fill(1),
+    layers: [
+      { w: Array.from({ length: D * 4 }, (_, i) => Math.cos(i) * 0.1), b: [0, 0.1, 0, 0] },
+      { w: [1, -1, 0.5, 0.25], b: [0] },
+    ],
+  };
+  const cnnModel = {
+    k: K,
+    channels: C,
+    inChannels: 448,
+    projection: '',
+    head: packModel(head, 'f32'),
+  };
+  const run = (options: CropOptions) =>
+    crop(img, {
+      width: img.width,
+      height: img.height,
+      scorer: 'learned',
+      candidates: [
+        { x: 0, y: 0, width: img.width, height: img.height },
+        { x: 10, y: 20, width: 100, height: 80 },
+        { x: 33.5, y: 7, width: 200, height: 120 },
+      ],
+      ...options,
+    });
+
+  it('changes nothing without cnn weights', async () => {
+    const base = await run({});
+    for (const options of [{ featureMap: fm }, { cnnModel }]) {
+      const r = await run(options);
+      expect(r.crops!.map((c) => c.score!.total)).toEqual(
+        base.crops!.map((c) => c.score!.total)
+      );
+      expect(r.topCrop).toEqual(base.topCrop);
+    }
+  });
+
+  it('scores each candidate with the cnn head', async () => {
+    const base = await run({});
+    const r = await run({ featureMap: fm, cnnModel });
+    expect(r.crops).toHaveLength(3);
+    for (const c of r.crops!) expect(Number.isFinite(c.score!.total)).toBe(true);
+    expect(r.crops!.map((c) => c.score!.total)).not.toEqual(
+      base.crops!.map((c) => c.score!.total)
+    );
+  });
+
+  it('pools RoI, RoD and the global mean', () => {
+    const cx = cnnContext(fm);
+    const out = new Float32Array(cnnDim(K, C));
+    // The whole image: RoI bins average the map, nothing is outside.
+    cnnFeatures(cx, K, 0, 0, 120, 80, 120, 80, out, 0);
+    const roiEnd = K * K * C;
+    expect(out.slice(roiEnd, 2 * roiEnd).every((v) => v === 0)).toBe(true);
+    const g = out.slice(2 * roiEnd);
+    for (let c = 0; c < C; c++) expect(g[c]).toBeCloseTo(cx.mean[c], 5);
+    let mean0 = 0;
+    for (let b = 0; b < K * K; b++) mean0 += out[b * C] / (K * K);
+    expect(mean0).toBeCloseTo(cx.mean[0], 4);
+    // A crop in the left half: bins fully inside it have no RoD.
+    cnnFeatures(cx, K, 0, 0, 60, 80, 120, 80, out, 0);
+    expect(out.slice(roiEnd, 2 * roiEnd).some((v) => v !== 0)).toBe(true);
+    expect(out.every(Number.isFinite)).toBe(true);
   });
 });

@@ -31,8 +31,19 @@ import {
   learnedFeatures,
   learnedScore,
   defaultModel,
+  unpackModel,
   type LearnedMaps,
+  type LearnedModel,
 } from './learned';
+import {
+  cnnContext,
+  cnnDim,
+  cnnFeatures,
+  type FeatureMap,
+  type PackedCnn,
+} from './cnn';
+
+export type { FeatureMap, PackedCnn } from './cnn';
 
 export interface CropBoost {
   x: number;
@@ -205,6 +216,16 @@ export interface Options {
    * windows. result.crops then holds one scored crop per candidate, in order.
    */
   candidates?: CropBox[];
+  /**
+   * Learned scorer only: a deep-feature map of the whole image from the
+   * optional cnn plug-in (plugins/onnx/cnn.ts). Used only together with
+   * `cnnModel`; without both, scoring is unchanged.
+   */
+  featureMap?: FeatureMap;
+  /** Weights of the cnn head (src/learned-cnn-weights.ts); see `featureMap`. */
+  cnnModel?: PackedCnn;
+  /** @internal Pool a K x K cnn grid into the emitted features even without a cnnModel (training dumps). */
+  cnnK?: number;
   /** @internal Return the learned feature vectors (n * FEATURE_COUNT) as result.features. */
   emitFeatures?: boolean;
 }
@@ -966,10 +987,11 @@ const applyContentFloor = (
   hasBoost: boolean,
   hasMap: boolean,
   feats: Float32Array,
+  stride: number,
   crops: Crop[]
 ): Crop | null => {
   const retained = crops.map((_, i) => {
-    const f = i * FEATURE_COUNT;
+    const f = i * stride;
     return hasMap
       ? feats[f + IDX.importance]
       : (feats[f + IDX.saliency] + feats[f + IDX.detail]) / 2;
@@ -977,7 +999,7 @@ const applyContentFloor = (
   const pass = crops.map(
     (_, i) =>
       retained[i] >= options.contentFloor &&
-      !(hasBoost && feats[i * FEATURE_COUNT + IDX.faceCut] > FLOOR_FACE_CUT)
+      !(hasBoost && feats[i * stride + IDX.faceCut] > FLOOR_FACE_CUT)
   );
   const any = pass.some(Boolean);
   let top: Crop | null = null;
@@ -991,6 +1013,16 @@ const applyContentFloor = (
     }
   });
   return top;
+};
+
+const cnnHeads = new WeakMap<PackedCnn, LearnedModel>();
+const cnnHead = (p: PackedCnn): LearnedModel => {
+  let m = cnnHeads.get(p);
+  if (!m) {
+    m = unpackModel(p.head, FEATURE_COUNT + cnnDim(p.k, p.channels));
+    cnnHeads.set(p, m);
+  }
+  return m;
 };
 
 const analyseLearned = (
@@ -1011,14 +1043,34 @@ const analyseLearned = (
         input.width,
         input.height
       );
-  const feats = new Float32Array(crops.length * FEATURE_COUNT);
-  const model = defaultModel();
+  // Optional deep features: appended after the hand features.
+  const cnnK = options.featureMap ? (options.cnnModel?.k ?? options.cnnK ?? 0) : 0;
+  const cx = cnnK ? cnnContext(options.featureMap!) : null;
+  const stride =
+    FEATURE_COUNT + (cx ? cnnDim(cnnK, options.featureMap!.channels) : 0);
+  const feats = new Float32Array(crops.length * stride);
+  const model =
+    cx && options.cnnModel ? cnnHead(options.cnnModel) : defaultModel();
   let topScore = -Infinity;
   let topCrop: Crop | null = null;
   for (let i = 0; i < crops.length; i++) {
     const c = crops[i];
-    learnedFeatures(ctx, c.x, c.y, c.width, c.height, feats, i * FEATURE_COUNT);
-    const total = learnedScore(feats, i * FEATURE_COUNT, model);
+    learnedFeatures(ctx, c.x, c.y, c.width, c.height, feats, i * stride);
+    if (cx) {
+      cnnFeatures(
+        cx,
+        cnnK,
+        c.x,
+        c.y,
+        c.width,
+        c.height,
+        ctx.width,
+        ctx.height,
+        feats,
+        i * stride + FEATURE_COUNT
+      );
+    }
+    const total = learnedScore(feats, i * stride, model);
     c.score = { detail: 0, saturation: 0, skin: 0, boost: 0, total };
     if (total > topScore || !topCrop) {
       topScore = total;
@@ -1042,7 +1094,7 @@ const analyseLearned = (
     });
   }
   if (options.contentFloor > 0) {
-    topCrop = applyContentFloor(options, ctx.boosts.length > 0, ctx.sums[4] !== null, feats, crops);
+    topCrop = applyContentFloor(options, ctx.boosts.length > 0, ctx.sums[4] !== null, feats, stride, crops);
   }
   result.topCrop = topCrop as Crop;
   if (options.candidates || options.debug) result.crops = crops;

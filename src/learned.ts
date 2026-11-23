@@ -567,9 +567,9 @@ export const learnedScore = (
 ): number => {
   const { mean, std, layers } = model;
   if (layers.length === 0) return 0; // untrained
-  const x0 = new Float64Array(FEATURE_COUNT);
-  for (let i = 0; i < FEATURE_COUNT; i++)
-    x0[i] = z(f[off + i], mean[i], std[i]);
+  const D = mean.length; // FEATURE_COUNT, or more for the cnn head
+  const x0 = new Float64Array(D);
+  for (let i = 0; i < D; i++) x0[i] = z(f[off + i], mean[i], std[i]);
   const nets = model.members ? [layers, ...model.members] : [layers];
   let sum = 0;
   for (const net of nets) sum += mlp(x0, net);
@@ -602,7 +602,7 @@ const mlp = (
 
 export interface PackedModel {
   kind: "f32" | "f16" | "q8";
-  /** outputs per layer; layer 0's input is FEATURE_COUNT */
+  /** outputs per layer; layer 0's input is FEATURE_COUNT (or the cnn head's input width) */
   sizes: number[];
   /** number of ensemble nets (1 + members) */
   nets: number;
@@ -642,6 +642,21 @@ const fromBase64 = (b64: string): Uint8Array => {
   const s = atob(b64);
   const out = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+};
+
+/** base64 of float16 little-endian values. */
+export const encodeF16 = (v: ArrayLike<number>): string => {
+  const dv = new DataView(new ArrayBuffer(2 * v.length));
+  for (let i = 0; i < v.length; i++) dv.setUint16(2 * i, f16bits(v[i]), true);
+  return toBase64(new Uint8Array(dv.buffer));
+};
+/** Inverse of encodeF16. */
+export const decodeF16 = (b64: string): Float32Array => {
+  const b = fromBase64(b64);
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const out = new Float32Array(b.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = f16value(dv.getUint16(2 * i, true));
   return out;
 };
 
@@ -698,10 +713,13 @@ export const packModel = (
   return { kind, sizes, nets: nets.length, data: toBase64(bytes) };
 };
 
-export const unpackModel = (p: PackedModel): LearnedModel => {
+export const unpackModel = (
+  p: PackedModel,
+  /** input width of layer 0 (the cnn head has more than FEATURE_COUNT) */
+  D: number = FEATURE_COUNT,
+): LearnedModel => {
   const bytes = fromBase64(p.data);
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const D = FEATURE_COUNT;
   let o = 0;
   const f32 = (n: number) => {
     const a: number[] = [];
