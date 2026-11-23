@@ -12,7 +12,7 @@
   ],
   "devDependencies": {
     "benchmark": "^2.1.4",
-    "chai": "^4.5.0",
+    "chai": "^6.3.0",
     "eslint": "^8.57.1",
     "@vladmandic/face-api": "^1.7.15",
     "grunt": "^1.6.3",
