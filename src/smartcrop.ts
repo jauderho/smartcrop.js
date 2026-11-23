@@ -212,6 +212,12 @@ export interface Options {
    */
   classicBlend: number;
   /**
+   * Learned scorer only: return the softmax-weighted mean of the top windows
+   * instead of the single best one (temperature in score standard deviations,
+   * e.g. 0.1). 0 = plain argmax.
+   */
+  consensus: number;
+  /**
    * Score exactly these crops (input-image coordinates) instead of generating
    * windows. result.crops then holds one scored crop per candidate, in order.
    */
@@ -1025,6 +1031,34 @@ const cnnHead = (p: PackedCnn): LearnedModel => {
   return m;
 };
 
+// Consensus crop: instead of the single highest-scoring window (a noisy
+// maximum over thousands of correlated windows), return the softmax-weighted
+// mean box of the best windows. temperature is in units of the score's
+// standard deviation over this image's windows. All windows share the target
+// aspect and lie inside the image, so their convex combination does too.
+const CONSENSUS_TOP = 64;
+const consensusCrop = (crops: Crop[], temperature: number, top: Crop): Crop => {
+  const t = crops.map((c) => c.score!.total);
+  const m = t.reduce((a, b) => a + b, 0) / t.length;
+  const sd = Math.sqrt(t.reduce((a, b) => a + (b - m) ** 2, 0) / t.length) || 1;
+  const best = t
+    .map((_, i) => i)
+    .sort((a, b) => t[b] - t[a])
+    .slice(0, CONSENSUS_TOP);
+  const tmax = t[best[0]];
+  let wsum = 0, x = 0, y = 0, w = 0, h = 0;
+  for (const i of best) {
+    const wt = Math.exp((t[i] - tmax) / (temperature * sd));
+    const c = crops[i];
+    wsum += wt;
+    x += wt * c.x;
+    y += wt * c.y;
+    w += wt * c.width;
+    h += wt * c.height;
+  }
+  return { x: x / wsum, y: y / wsum, width: w / wsum, height: h / wsum, score: top.score };
+};
+
 const analyseLearned = (
   options: Options,
   input: ImgDataLike,
@@ -1095,6 +1129,9 @@ const analyseLearned = (
   }
   if (options.contentFloor > 0) {
     topCrop = applyContentFloor(options, ctx.boosts.length > 0, ctx.sums[4] !== null, feats, stride, crops);
+  }
+  if (options.consensus > 0 && !options.candidates && crops.length > 1 && topCrop) {
+    topCrop = consensusCrop(crops, options.consensus, topCrop);
   }
   result.topCrop = topCrop as Crop;
   if (options.candidates || options.debug) result.crops = crops;
@@ -1352,6 +1389,7 @@ const DEFAULTS: Options = {
   scorer: 'classic',
   contentFloor: 0,
   classicBlend: 0,
+  consensus: 0,
 };
 
 /**
