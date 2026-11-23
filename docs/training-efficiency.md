@@ -185,9 +185,9 @@ docs, tests, eval scripts, `parallel`, `gate_margin` and `force` are excluded.
 - Wiring: `.github/workflows/weights-fresh.yml` (`workflow_call` and
   `workflow_dispatch`) runs the check and, on failure, writes the stale message and
   links the latest successful Train runs to the job summary.
-  `release.yml` (which replaced `publish.yml`) has `weights-fresh` as a job and `release` `needs` it; its
-  trigger (manual only) and the disabled npm publishing are unchanged, and
-  `scripts/release.sh` stays disabled. `tests.yml` is not gated (see risks).
+  `release.yml` (which replaced `publish.yml`) has `weights-fresh` as a job and `release` `needs` it; it runs on
+  a `v*` tag and publishes to npm and GitHub releases. `scripts/release.sh`
+  stays disabled. `tests.yml` is not gated (see risks).
 
 ## 4. Estimates
 
