@@ -1,8 +1,12 @@
 name: Publish
 
+# Disabled: npm publishing is off for this fork; releases are made on GitHub.
+# Manual runs only. To re-enable on releases, restore:
+#   on:
+#     release:
+#       types: [published]
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read

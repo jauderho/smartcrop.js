@@ -11,4 +11,5 @@ ignorePatterns = [
   "examples/q.js",
   "examples/underscore.js",
   "examples/images/**",
+  "dist/**",
 ]

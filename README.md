@@ -37,12 +37,36 @@ Output:
 
 ## Download/ Installation
 
-`npm install smartcrop`
-or just download [smartcrop.js](https://raw.githubusercontent.com/jwagner/smartcrop.js/master/smartcrop.js) from the git repository.
+This fork is not published to npm; the `smartcrop` package on npm is the original 2.x release.
+Download the built files from the [GitHub releases](https://github.com/jauderho/smartcrop.js/releases), or build them from source:
 
-Smarcrop requires support for [Promises](http://caniuse.com/#feat=promises),
-use a [polyfill](https://github.com/taylorhakes/promise-polyfill) for unsupported browsers or set `smartcrop.Promise` to your favorite promise implementation
-(I recommend [bluebird](http://bluebirdjs.com/)).
+```sh
+git clone https://github.com/jauderho/smartcrop.js.git
+cd smartcrop.js
+bun install
+bun run build   # writes dist/
+```
+
+ES module (`dist/smartcrop.js`):
+
+```javascript
+import smartcrop from './smartcrop.js';
+```
+
+CommonJS (`dist/smartcrop.cjs`):
+
+```javascript
+const smartcrop = require('./smartcrop.cjs');
+```
+
+Browser, via a script tag (`dist/smartcrop.iife.js`, defines `window.smartcrop`):
+
+```html
+<script src="smartcrop.iife.js"></script>
+```
+
+Smartcrop requires a browser or runtime with ES2020 support.
+Native Promises are used, so no polyfill is needed. You can still set `smartcrop.Promise` to another promise implementation if you prefer.
 
 ## Consider avoiding crops using dont-crop
 
@@ -105,15 +129,14 @@ It would be interesting to see how more [state of the art](http://mmlab.ie.cuhk.
 
 ## Supported Module Formats
 
-- CommonJS
-- AMD
-- global export / window
+- ES module (`dist/smartcrop.js`)
+- CommonJS (`dist/smartcrop.cjs`)
+- browser global / `window.smartcrop` (`dist/smartcrop.iife.js`)
 
 ## Supported Browsers
 
-See [caniuse.com/canvas](http://caniuse.com/canvas).
-A [polyfill](https://github.com/taylorhakes/promise-polyfill) for
-[Promises](http://caniuse.com/#feat=promises) is recommended if you need to support old browsers.
+Any browser with ES2020 and [canvas](http://caniuse.com/canvas) support.
+Internet Explorer is not supported, use smartcrop 2.x if you need it.
 
 ## API
 
@@ -142,10 +165,10 @@ You may not use cross-domain images without [CORS](https://en.wikipedia.org/wiki
 
 **ruleOfThirds:** optional boolean if set to false it will turn off the rule of thirds composition weight.
 
-**debug _(internal)_:** if true, cropResults will contain a debugCanvas and the complete results array.
+**debug _(internal)_:** if true, the cropResult will contain debugOutput, debugOptions and debugTopCrop as well as the complete crops array.
 
 There are many more (for now undocumented) options available.
-Check the [source](smartcrop.js#L32) and be advised that they might change in the future.
+Check the [source](src/smartcrop.ts) and be advised that they might change in the future.
 
 ### cropResult
 
@@ -224,6 +247,15 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 - [dont-crop](https://github.com/jwagner/dont-crop/) a library to avoid cropping by padding images with matching colors or gradients
 
 ## Version history
+
+### 3.0.0
+
+- TypeScript source (`src/smartcrop.ts`) and generated type definitions.
+- ES module, CommonJS and browser builds in `dist/` with a package.json `exports` map.
+- Removed the AMD module format and the root `smartcrop.js`.
+- ES2020 baseline, Internet Explorer is no longer supported.
+- Image operations now consistently use `smartcrop.Promise`.
+- bun based development tooling (`bun test`, `bun check`, `bun fmt`).
 
 ### 2.0.5
 

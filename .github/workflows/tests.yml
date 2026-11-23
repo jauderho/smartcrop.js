@@ -21,4 +21,5 @@ jobs:
       - run: bun fmt --check
       - run: bun --bun run lint
       - run: bun check
+      - run: bun run build
       - run: bun test

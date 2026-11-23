@@ -1,4 +1,9 @@
 #!/bin/sh
+
+# Disabled: this fork does not publish or deploy yet. Releases are made on
+# GitHub. Remove these lines to re-enable.
+echo "release.sh is disabled for this fork." >&2
+exit 1
 version="$1"
 if [ -z "$version" ]; then
     echo "Usage: release.sh version"

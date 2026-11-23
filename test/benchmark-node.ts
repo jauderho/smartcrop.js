@@ -1,7 +1,7 @@
 // Run from the repo root: bun run bench
 import Benchmark from 'benchmark';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import smartcrop from '..';
+import smartcrop from '../src/smartcrop';
 
 const img = await loadImage(
   new URL('../examples/images/flickr/kitty.jpg', import.meta.url).pathname

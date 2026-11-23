@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# Disabled: this fork does not publish or deploy yet. Releases are made on
+# GitHub. Remove these lines to re-enable.
+echo "sync-web.sh is disabled for this fork." >&2
+exit 1
 for f in examples/*.{html,js,css}; do
   gzip -k $f
 done

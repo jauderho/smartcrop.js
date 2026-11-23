@@ -1,15 +1,29 @@
 {
   "name": "smartcrop",
-  "version": "2.0.5",
+  "version": "3.0.0",
+  "private": true,
   "description": "Content aware image cropping.",
   "homepage": "https://github.com/jwagner/smartcrop.js",
   "author": "Jonas Wagner <jonas@29a.ch> (http://29a.ch/)",
-  "main": "./smartcrop",
-  "types": "./index.d.ts",
+  "main": "./dist/smartcrop.cjs",
+  "module": "./dist/smartcrop.js",
+  "types": "./dist/smartcrop.d.ts",
+  "jsdelivr": "./dist/smartcrop.iife.js",
+  "unpkg": "./dist/smartcrop.iife.js",
+  "exports": {
+    ".": {
+      "types": "./dist/smartcrop.d.ts",
+      "import": "./dist/smartcrop.js",
+      "require": "./dist/smartcrop.cjs",
+      "default": "./dist/smartcrop.js"
+    },
+    "./browser": "./dist/smartcrop.iife.js",
+    "./package.json": "./package.json"
+  },
   "files": [
-    "smartcrop.js",
-    "index.d.ts"
+    "dist"
   ],
+  "sideEffects": false,
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@napi-rs/canvas": "^1.2.0",
@@ -19,7 +33,8 @@
     "benchmark": "^2.1.4",
     "eslint": "^10.15.0",
     "globals": "^17.14.0",
-    "lodash": "^4.18.1"
+    "lodash": "^4.18.1",
+    "typescript": "^7.0.2"
   },
   "license": "MIT",
   "repository": {
@@ -27,8 +42,10 @@
     "url": "https://github.com/jwagner/smartcrop.js.git"
   },
   "scripts": {
+    "build": "bun scripts/build.ts",
+    "prepublishOnly": "bun run build",
     "start": "bun scripts/serve.ts",
-    "test": "bun test",
+    "test": "bun run build && bun test",
     "lint": "eslint .",
     "bench": "bun test/benchmark-node.ts"
   }

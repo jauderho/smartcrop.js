@@ -3,6 +3,14 @@
 import { join, normalize } from 'node:path';
 
 const root = normalize(join(import.meta.dir, '..'));
+
+// Build dist/ so the examples load the current source.
+const build = Bun.spawnSync(['bun', 'run', 'build'], {
+  cwd: root,
+  stdout: 'inherit',
+  stderr: 'inherit',
+});
+if (build.exitCode !== 0) process.exit(build.exitCode ?? 1);
 const portArg = process.argv.indexOf('--port');
 const port = portArg > -1 ? Number(process.argv[portArg + 1]) : 8000;
 

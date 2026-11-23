@@ -5,6 +5,7 @@ export default [
   {
     ignores: [
       'node_modules/',
+      'dist/',
       'examples/*.min.js',
       'examples/*-min.js',
       'examples/face-api.js',
@@ -47,13 +48,5 @@ export default [
     // debugDraw is defined here; don't flag it as a redeclared global.
     files: ['examples/smartcrop-debug.js'],
     languageOptions: { globals: { debugDraw: 'off' } },
-  },
-  {
-    // The published library stays ES5 so it keeps working in old browsers.
-    files: ['smartcrop.js'],
-    languageOptions: {
-      ecmaVersion: 5,
-      globals: { Promise: 'readonly', Uint8ClampedArray: 'readonly' },
-    },
   },
 ];

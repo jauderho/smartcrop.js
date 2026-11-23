@@ -1,24 +1,18 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { createCanvas, loadImage, type Image } from '@napi-rs/canvas';
 import smartcrop, {
+  type CanvasFactory,
   type CropOptions,
   type CropResult,
-  type ImageData,
-  type ImageOperations,
-} from '..';
+} from '../src/smartcrop';
 
-// Internal helpers exposed on the module for testing.
-const internals = smartcrop as typeof smartcrop & {
-  _downSample(input: ImageData, factor: number): ImageData;
-  _canvasImageOperations(
-    canvasFactory: typeof createCanvas
-  ): ImageOperations<unknown>;
-};
+// Internal helpers are exposed on the module for testing.
+const internals = smartcrop;
 
 const KITTY = new URL('../examples/images/flickr/kitty.jpg', import.meta.url)
   .pathname;
 
-const canvasFactory = (w: number, h: number) => createCanvas(w, h);
+const canvasFactory: CanvasFactory = (w, h) => createCanvas(w, h);
 const crop = (image: unknown, options: CropOptions = {}) =>
   smartcrop.crop(image, { canvasFactory, ...options });
 
@@ -141,7 +135,7 @@ describe('crop', () => {
 
 describe('iop.open', () => {
   it('passes input options', async () => {
-    const iop = internals._canvasImageOperations(createCanvas);
+    const iop = internals._canvasImageOperations(canvasFactory);
     const open = iop.open;
     let inputOptions: unknown;
     iop.open = (image, inputOptions_) => {
@@ -162,7 +156,7 @@ describe('smartcrop.Promise', () => {
     const original = smartcrop.Promise;
     smartcrop.Promise = CustomPromise;
     try {
-      const iop = internals._canvasImageOperations(createCanvas);
+      const iop = internals._canvasImageOperations(canvasFactory);
       const c = createCanvas(16, 16);
       const opened = iop.open(c);
       const resampled = iop.resample(c, 8, 8);
