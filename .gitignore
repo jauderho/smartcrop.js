@@ -2,3 +2,7 @@ node_modules
 .500px-consumer-key
 dist
 release
+bench/private/
+bench/datasets/
+bench/out/
+bench/models/
