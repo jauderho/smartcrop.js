@@ -638,10 +638,23 @@ const toBase64 = (bytes: Uint8Array): string => {
   for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
   return btoa(s);
 };
+// Plain decoder: the library must not depend on a global atob (it is the
+// default scorer, so it runs wherever smartcrop runs).
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const fromBase64 = (b64: string): Uint8Array => {
-  const s = atob(b64);
-  const out = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  const s = b64.replace(/[^A-Za-z0-9+/]/g, "");
+  const out = new Uint8Array(Math.floor((s.length * 3) / 4));
+  let o = 0;
+  for (let i = 0; i < s.length; i += 4) {
+    const n =
+      (B64.indexOf(s[i]) << 18) |
+      (B64.indexOf(s[i + 1]) << 12) |
+      ((i + 2 < s.length ? B64.indexOf(s[i + 2]) : 0) << 6) |
+      (i + 3 < s.length ? B64.indexOf(s[i + 3]) : 0);
+    out[o++] = n >> 16;
+    if (i + 2 < s.length) out[o++] = (n >> 8) & 255;
+    if (i + 3 < s.length) out[o++] = n & 255;
+  }
   return out;
 };
 
