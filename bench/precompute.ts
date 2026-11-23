@@ -2,7 +2,7 @@
 // bench/out/cache/<dataset>/. Resumable: existing cache entries are skipped.
 //
 // Usage: bun bench/precompute.ts <fcdb|flms|gaicd|examples|strips> [--split test|train|all]
-//          [--limit N] [--labels path/to/strip-labels.json]
+//          [--limit N] [--shard k/n] [--labels path/to/strip-labels.json]
 // `strips` caches for the 512-px 3:2 center-cropped canvas used by strip-eval.
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { readdir } from 'node:fs/promises';
@@ -23,6 +23,8 @@ const take = (name: string, fallback?: string) => {
 };
 const split = take('split', 'all')!;
 const limit = Number(take('limit', '0'));
+// --shard k/n: only every n-th image starting at k (parallel processes).
+const shard = take('shard', '0/1')!.split('/').map(Number);
 const labelsPath = take(
   'labels',
   join(import.meta.dir, 'private/jauderho-strip.json')
@@ -86,10 +88,13 @@ if (dataset === 'gaicd') {
     strip: true,
   }));
 } else {
-  console.error('usage: bun bench/precompute.ts <fcdb|flms|gaicd|examples|strips>');
+  console.error(
+    'usage: bun bench/precompute.ts <fcdb|flms|gaicd|examples|strips>'
+  );
   process.exit(2);
 }
 if (limit > 0) items = items.slice(0, limit);
+items = items.filter((_, i) => i % shard[1] === shard[0]);
 
 const WIDTH = 512;
 let tf = 0;

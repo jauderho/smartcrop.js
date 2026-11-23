@@ -15,7 +15,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FeatureMap, PackedCnn } from '../../src/cnn';
 import { decodeF16 } from '../../src/learned';
-import { getOrt, modelDir, resizeRGBA, type RGBAImage } from './runtime';
+import {
+  getOrt,
+  modelDir,
+  resizeRGBA,
+  sessionOptions,
+  type RGBAImage,
+} from './runtime';
 import { patchOnnx } from './onnx-patch';
 
 type Session = import('onnxruntime-node').InferenceSession;
@@ -52,7 +58,7 @@ const getBackbone = (path: string): Promise<Session> => {
     s = (async () => {
       const ort = await getOrt();
       const bytes = patchOnnx(new Uint8Array(await readFile(path)), [...TAPS]);
-      return ort.InferenceSession.create(bytes, { logSeverityLevel: 3 });
+      return ort.InferenceSession.create(bytes, sessionOptions());
     })();
     sessions.set(path, s);
   }
@@ -146,10 +152,7 @@ export async function cnnRawMap(
 }
 
 /** Project a raw map with a fixed linear projection. */
-export const projectMap = (
-  raw: FeatureMap,
-  p: CnnProjection
-): FeatureMap => {
+export const projectMap = (raw: FeatureMap, p: CnnProjection): FeatureMap => {
   const n = raw.width * raw.height;
   const C = p.channels;
   const R = raw.channels;

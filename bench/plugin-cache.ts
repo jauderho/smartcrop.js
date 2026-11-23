@@ -26,7 +26,12 @@ export const CACHE_FACE_THRESHOLD = 0.5;
 export const imageKey = (path: string) =>
   basename(path).replace(/\.[^.]+$/, '');
 
-const dirFor = (dataset: string) => join(import.meta.dir, 'out/cache', dataset);
+// SMARTCROP_CACHE_DIR relocates the cache (CI cache dir, scratch runs).
+const dirFor = (dataset: string) =>
+  join(
+    process.env.SMARTCROP_CACHE_DIR ?? join(import.meta.dir, 'out/cache'),
+    dataset
+  );
 
 export async function loadFaces(
   dataset: string,

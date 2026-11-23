@@ -16,16 +16,16 @@
 // deep features (dump.ts --with faces,saliency,cnn --cnnk K); the default sets
 // become gaicd-train/val and fcdb-train with +faces+saliency+cnn[K]. --write
 // then stores models/cnn-latest.json and shrinks to src/learned-cnn-weights.ts.
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { packModel, type LearnedModel } from "../../src/learned";
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { packModel, type LearnedModel } from '../../src/learned';
 
 const args = process.argv.slice(2);
 const opt = (n: string, d?: string) => {
   const i = args.indexOf(`--${n}`);
   return i > -1 ? args[i + 1] : d;
 };
-const OUT = resolve(import.meta.dir, "../out/learned");
+const OUT = resolve(import.meta.dir, '../out/learned');
 const CNN_CHANNELS = 32;
 
 type DataSet = {
@@ -35,11 +35,11 @@ type DataSet = {
 };
 
 async function load(name: string) {
-  const m = JSON.parse(await readFile(`${OUT}/${name}.json`, "utf8"));
+  const m = JSON.parse(await readFile(`${OUT}/${name}.json`, 'utf8'));
   const X = new Float32Array(
-    await Bun.file(`${OUT}/${name}.bin`).arrayBuffer(),
+    await Bun.file(`${OUT}/${name}.bin`).arrayBuffer()
   );
-  return { D: m.D as number, X, imgs: m.images as DataSet["imgs"] };
+  return { D: m.D as number, X, imgs: m.images as DataSet['imgs'] };
 }
 
 const mulberry = (a: number) => () => {
@@ -50,32 +50,34 @@ const mulberry = (a: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 
-const cnnK = Number(opt("cnn", "0"));
-const cnnSuffix = cnnK ? `-faces+saliency+cnn${cnnK === 3 ? "" : cnnK}` : "";
-const sets = (opt("sets", `gaicd-train${cnnSuffix}`) as string).split(",");
-const valNames = (opt("val", `gaicd-val${cnnSuffix}`) as string).split(",");
+const cnnK = Number(opt('cnn', '0'));
+const cnnSuffix = cnnK ? `-faces+saliency+cnn${cnnK === 3 ? '' : cnnK}` : '';
+const sets = (opt('sets', `gaicd-train${cnnSuffix}`) as string).split(',');
+const valNames = (opt('val', `gaicd-val${cnnSuffix}`) as string).split(',');
 const valName = valNames[0];
-const fcdbW = Number(opt("fcdb", "0"));
-const ppi = Number(opt("ppi", "64"));
-const epochs = Number(opt("epochs", "40"));
+const fcdbW = Number(opt('fcdb', '0'));
+const ppi = Number(opt('ppi', '64'));
+const epochs = Number(opt('epochs', '40'));
 // --lambda a: LambdaRank-style pair weights (|delta NDCG| of swapping the
 // pair under the current ranking), mixed as (1 - a) + a * normalised weight,
 // to focus training on the top of each image's ranking.
-const lambdaMix = Number(opt("lambda", "0"));
+const lambdaMix = Number(opt('lambda', '0'));
 // --ema d: keep an exponential moving average of the weights (decay d per
 // optimiser step) and evaluate/select/write that instead of the raw weights.
-const emaDecay = Number(opt("ema", "0"));
+const emaDecay = Number(opt('ema', '0'));
 // --cosine: cosine learning-rate decay instead of linear decay in the second half.
-const cosine = args.includes("--cosine");
+const cosine = args.includes('--cosine');
 
 const train = await Promise.all(sets.map(load));
 const vals = await Promise.all(valNames.map(load));
 const val = vals[0];
 const D = train[0].D;
 for (const d of [...train, ...vals])
-  if (d.D !== D) throw new Error("feature count mismatch; re-run dump.ts");
+  if (d.D !== D) throw new Error('feature count mismatch; re-run dump.ts');
 
-const fcNames = (opt("fcdbsets", `fcdb-train${cnnSuffix}`) as string).split(",");
+const fcNames = (opt('fcdbsets', `fcdb-train${cnnSuffix}`) as string).split(
+  ','
+);
 let fcs: DataSet[] = [];
 let fcHolds: DataSet[] = [];
 if (fcdbW > 0) {
@@ -117,17 +119,17 @@ const standardise = (ds: DataSet) => {
     for (let k = 0; k < D; k++) {
       X[r * D + k] = Math.max(
         -6,
-        Math.min(6, (X[r * D + k] - mean[k]) / std[k]),
+        Math.min(6, (X[r * D + k] - mean[k]) / std[k])
       );
     }
   }
 };
 [...train, ...vals, ...fcs].forEach(standardise);
 // --drop <regex>: ablation, zero every feature whose name matches.
-const dropRe = opt("drop");
+const dropRe = opt('drop');
 if (dropRe) {
   const names: string[] = JSON.parse(
-    await readFile(`${OUT}/${valName}.json`, "utf8"),
+    await readFile(`${OUT}/${valName}.json`, 'utf8')
   ).names;
   const cols = names
     .map((n, k) => (new RegExp(dropRe).test(n) ? k : -1))
@@ -154,8 +156,8 @@ const newNet = (hidden: number[], rnd: () => number): Net => {
         () =>
           (rnd() * 2 - 1) *
           lim *
-          (l === sizes.length - 2 && hidden.length ? 0.3 : 1),
-      ),
+          (l === sizes.length - 2 && hidden.length ? 0.3 : 1)
+      )
     );
     B.push(new Float64Array(sizes[l + 1]));
   }
@@ -163,27 +165,83 @@ const newNet = (hidden: number[], rnd: () => number): Net => {
 };
 const newActs = (net: Net) => net.sizes.map((n) => new Float64Array(n));
 
+// Forward pass for row r of X. Layer 0 reads X directly (no copy to acts[0]);
+// outputs are computed four at a time with independent accumulators, each
+// summed in the original i order, so results are bit-identical to the plain
+// loop while hiding the add latency.
 const forward = (
   net: Net,
   X: Float32Array,
   r: number,
-  acts: Float64Array[],
+  acts: Float64Array[]
 ): number => {
   const o = r * D;
-  const x0 = acts[0];
-  for (let k = 0; k < D; k++) x0[k] = X[o + k];
   const L = net.W.length;
   for (let l = 0; l < L; l++) {
     const n = net.sizes[l];
     const m = net.sizes[l + 1];
     const w = net.W[l];
-    const x = acts[l];
+    const bias = net.B[l];
     const y = acts[l + 1];
-    for (let j = 0; j < m; j++) {
-      let a = net.B[l][j];
-      const jo = j * n;
-      for (let i = 0; i < n; i++) a += w[jo + i] * x[i];
-      y[j] = l < L - 1 && a < 0 ? 0 : a;
+    const relu = l < L - 1;
+    let j = 0;
+    if (l === 0) {
+      for (; j + 3 < m; j += 4) {
+        let a0 = bias[j],
+          a1 = bias[j + 1],
+          a2 = bias[j + 2],
+          a3 = bias[j + 3];
+        const j0 = j * n,
+          j1 = j0 + n,
+          j2 = j1 + n,
+          j3 = j2 + n;
+        for (let i = 0; i < n; i++) {
+          const xi = X[o + i];
+          a0 += w[j0 + i] * xi;
+          a1 += w[j1 + i] * xi;
+          a2 += w[j2 + i] * xi;
+          a3 += w[j3 + i] * xi;
+        }
+        y[j] = relu && a0 < 0 ? 0 : a0;
+        y[j + 1] = relu && a1 < 0 ? 0 : a1;
+        y[j + 2] = relu && a2 < 0 ? 0 : a2;
+        y[j + 3] = relu && a3 < 0 ? 0 : a3;
+      }
+      for (; j < m; j++) {
+        let a = bias[j];
+        const jo = j * n;
+        for (let i = 0; i < n; i++) a += w[jo + i] * X[o + i];
+        y[j] = relu && a < 0 ? 0 : a;
+      }
+    } else {
+      const x = acts[l];
+      for (; j + 3 < m; j += 4) {
+        let a0 = bias[j],
+          a1 = bias[j + 1],
+          a2 = bias[j + 2],
+          a3 = bias[j + 3];
+        const j0 = j * n,
+          j1 = j0 + n,
+          j2 = j1 + n,
+          j3 = j2 + n;
+        for (let i = 0; i < n; i++) {
+          const xi = x[i];
+          a0 += w[j0 + i] * xi;
+          a1 += w[j1 + i] * xi;
+          a2 += w[j2 + i] * xi;
+          a3 += w[j3 + i] * xi;
+        }
+        y[j] = relu && a0 < 0 ? 0 : a0;
+        y[j + 1] = relu && a1 < 0 ? 0 : a1;
+        y[j + 2] = relu && a2 < 0 ? 0 : a2;
+        y[j + 3] = relu && a3 < 0 ? 0 : a3;
+      }
+      for (; j < m; j++) {
+        let a = bias[j];
+        const jo = j * n;
+        for (let i = 0; i < n; i++) a += w[jo + i] * x[i];
+        y[j] = relu && a < 0 ? 0 : a;
+      }
     }
   }
   return acts[L][0];
@@ -268,12 +326,12 @@ function evalVal(p: Net | Net[]) {
   const avg = (k: keyof (typeof rs)[0]) =>
     rs.reduce((s, r) => s + r[k], 0) / rs.length;
   return {
-    srcc: avg("srcc"),
-    acc1_5: avg("acc1_5"),
-    acc1_10: avg("acc1_10"),
-    acc5: avg("acc5"),
-    acc10: avg("acc10"),
-    top1: avg("top1"),
+    srcc: avg('srcc'),
+    acc1_5: avg('acc1_5'),
+    acc1_10: avg('acc1_10'),
+    acc5: avg('acc5'),
+    acc10: avg('acc10'),
+    top1: avg('top1'),
     per: rs.map((r) => +r.srcc.toFixed(4)),
   };
 }
@@ -292,11 +350,15 @@ function fit(cfg: Cfg, verbose: boolean) {
   let step = 0;
   const shadow: Net | null =
     emaDecay > 0
-      ? { sizes: net.sizes, W: net.W.map((x) => x.slice()), B: net.B.map((x) => x.slice()) }
+      ? {
+          sizes: net.sizes,
+          W: net.W.map((x) => x.slice()),
+          B: net.B.map((x) => x.slice()),
+        }
       : null;
   const shadowTensors = shadow ? [...shadow.W, ...shadow.B] : [];
 
-  type Item = { ds: DataSet; im: DataSet["imgs"][number]; wt: number };
+  type Item = { ds: DataSet; im: DataSet['imgs'][number]; wt: number };
   const items: Item[] = [];
   for (const ds of train)
     for (const im of ds.imgs) items.push({ ds, im, wt: 1 });
@@ -305,28 +367,74 @@ function fit(cfg: Cfg, verbose: boolean) {
 
   const actA = newActs(net);
   const actB = newActs(net);
-  const deltas = net.sizes.map((n) => new Float64Array(n));
-  const backward = (acts: Float64Array[], c: number) => {
-    deltas[L][0] = c;
+  const deltasA = net.sizes.map((n) => new Float64Array(n));
+  const deltasB = net.sizes.map((n) => new Float64Array(n));
+  // Backward pass of both rows of a pair at once. Each gradient element still
+  // receives "+= dA * xA" then "+= dB * xB" in that order (what two separate
+  // passes did), so the result is bit-identical; the fused loop reads and
+  // writes the gradient buffers once instead of twice.
+  const backward2 = (
+    X: Float32Array,
+    oA: number,
+    oB: number,
+    cA: number,
+    cB: number
+  ) => {
+    deltasA[L][0] = cA;
+    deltasB[L][0] = cB;
     for (let l = L - 1; l >= 0; l--) {
       const n = net.sizes[l];
       const mm = net.sizes[l + 1];
       const w = net.W[l];
       const gw = g[l];
       const gb = g[L + l];
-      const x = acts[l];
-      const dOut = deltas[l + 1];
-      const dIn = deltas[l];
-      if (l > 0) dIn.fill(0);
-      for (let j = 0; j < mm; j++) {
-        const d = dOut[j];
-        if (d === 0) continue;
-        gb[j] += d;
-        const jo = j * n;
-        for (let i = 0; i < n; i++) gw[jo + i] += d * x[i];
-        if (l > 0) for (let i = 0; i < n; i++) dIn[i] += d * w[jo + i];
+      const dOutA = deltasA[l + 1];
+      const dOutB = deltasB[l + 1];
+      const dInA = deltasA[l];
+      const dInB = deltasB[l];
+      if (l > 0) {
+        dInA.fill(0);
+        dInB.fill(0);
       }
-      if (l > 0) for (let i = 0; i < n; i++) if (x[i] <= 0) dIn[i] = 0;
+      const xa = l > 0 ? actA[l] : null;
+      const xb = l > 0 ? actB[l] : null;
+      for (let j = 0; j < mm; j++) {
+        const dA = dOutA[j];
+        const dB = dOutB[j];
+        if (dA === 0 && dB === 0) continue;
+        const jo = j * n;
+        if (dA !== 0) gb[j] += dA;
+        if (dB !== 0) gb[j] += dB;
+        if (l === 0) {
+          if (dA !== 0 && dB !== 0) {
+            for (let i = 0; i < n; i++)
+              gw[jo + i] = gw[jo + i] + dA * X[oA + i] + dB * X[oB + i];
+          } else if (dA !== 0) {
+            for (let i = 0; i < n; i++) gw[jo + i] += dA * X[oA + i];
+          } else {
+            for (let i = 0; i < n; i++) gw[jo + i] += dB * X[oB + i];
+          }
+        } else {
+          const xA = xa!;
+          const xB = xb!;
+          if (dA !== 0) {
+            for (let i = 0; i < n; i++) gw[jo + i] += dA * xA[i];
+            for (let i = 0; i < n; i++) dInA[i] += dA * w[jo + i];
+          }
+          if (dB !== 0) {
+            for (let i = 0; i < n; i++) gw[jo + i] += dB * xB[i];
+            for (let i = 0; i < n; i++) dInB[i] += dB * w[jo + i];
+          }
+        }
+      }
+      if (l > 0) {
+        const xA = xa!;
+        const xB = xb!;
+        for (let i = 0; i < n; i++) {
+          if (xA[i] <= 0) dInA[i] = 0;
+          if (xB[i] <= 0) dInB[i] = 0;
+        }
+      }
     }
   };
 
@@ -358,6 +466,8 @@ function fit(cfg: Cfg, verbose: boolean) {
   let best = { srcc: -2 } as any;
   let bestNet: Net | null = null;
   let bestEpoch = 0;
+  let tTrain = 0;
+  let tEval = 0;
   const BATCH = 512;
   const lr0 = cfg.lr;
   for (let ep = 0; ep < epochs; ep++) {
@@ -371,6 +481,7 @@ function fit(cfg: Cfg, verbose: boolean) {
       const j = Math.floor(rnd() * (i + 1));
       [items[i], items[j]] = [items[j], items[i]];
     }
+    const tEp = performance.now();
     let inBatch = 0;
     let loss = 0;
     let cnt = 0;
@@ -393,7 +504,9 @@ function fit(cfg: Cfg, verbose: boolean) {
       if (lambdaMix > 0 && pairs.length) {
         // Current ranking of this image's crops, then |delta NDCG| per pair.
         scratch = newActs(net);
-        const sc = Array.from({ length: im.n }, (_, i) => score1(net, ds.X, im.off + i));
+        const sc = Array.from({ length: im.n }, (_, i) =>
+          score1(net, ds.X, im.off + i)
+        );
         const order = sc.map((_, i) => i).sort((x, y) => sc[y] - sc[x]);
         const rank = new Array<number>(im.n);
         order.forEach((i, r) => (rank[i] = r));
@@ -404,8 +517,10 @@ function fit(cfg: Cfg, verbose: boolean) {
         const raw = pairs.map(
           ([a, b]) =>
             (Math.abs(gain(im.mos[a]) - gain(im.mos[b])) *
-              Math.abs(1 / Math.log2(rank[a] + 2) - 1 / Math.log2(rank[b] + 2))) /
-            idcg,
+              Math.abs(
+                1 / Math.log2(rank[a] + 2) - 1 / Math.log2(rank[b] + 2)
+              )) /
+            idcg
         );
         const mean = raw.reduce((t, x) => t + x, 0) / raw.length || 1;
         pw = raw.map((x) => 1 - lambdaMix + (lambdaMix * x) / mean);
@@ -419,8 +534,7 @@ function fit(cfg: Cfg, verbose: boolean) {
         const sig = 1 / (1 + Math.exp(d)); // sigma(-d)
         loss += Math.log1p(Math.exp(-d));
         cnt++;
-        backward(actA, -sig * w);
-        backward(actB, sig * w);
+        backward2(ds.X, (im.off + a) * D, (im.off + b) * D, -sig * w, sig * w);
         if (++inBatch === BATCH) {
           adam(BATCH);
           inBatch = 0;
@@ -428,6 +542,8 @@ function fit(cfg: Cfg, verbose: boolean) {
       }
     }
     if (inBatch) adam(inBatch);
+    const tEv = performance.now();
+    tTrain += tEv - tEp;
     const evalNet = shadow ?? net;
     const r = evalVal(evalNet);
     const h = fcHolds.length
@@ -437,11 +553,12 @@ function fit(cfg: Cfg, verbose: boolean) {
             fcHolds.length,
         }
       : null;
+    tEval += performance.now() - tEv;
     const score = r.srcc + (h ? h.top1 : 0);
     if (verbose) {
       console.log(
         `ep ${ep} loss ${(loss / cnt).toFixed(4)} val srcc ${r.srcc.toFixed(4)} [${r.per}] acc1/5 ${r.acc1_5.toFixed(1)} acc1/10 ${r.acc1_10.toFixed(1)}` +
-          (h ? ` fcdb-holdout IoU ${h.top1.toFixed(4)}` : ""),
+          (h ? ` fcdb-holdout IoU ${h.top1.toFixed(4)}` : '')
       );
     }
     if (!bestNet || score > best.score) {
@@ -455,6 +572,10 @@ function fit(cfg: Cfg, verbose: boolean) {
     }
   }
   cfg.lr = lr0;
+  if (verbose)
+    console.log(
+      `time: train ${(tTrain / 1000).toFixed(1)}s, val/holdout eval ${(tEval / 1000).toFixed(1)}s over ${epochs} epochs`
+    );
   return { p: bestNet!, best, epoch: bestEpoch };
 }
 
@@ -467,10 +588,9 @@ const toModel = (p: Net): LearnedModel => ({
   layers: p.W.map((w, l) => ({ w: [...w], b: [...p.B[l]] })),
 });
 const write = async (model: LearnedModel, note: string) => {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const path =
-    opt("out") ??
-    resolve(OUT, "models", `${cnnK ? "cnn-" : ""}${stamp}.json`);
+    opt('out') ?? resolve(OUT, 'models', `${cnnK ? 'cnn-' : ''}${stamp}.json`);
   const body = JSON.stringify({
     note,
     model,
@@ -478,32 +598,32 @@ const write = async (model: LearnedModel, note: string) => {
   });
   await Bun.write(path, body);
   console.log(`wrote full-precision model ${path}`);
-  if (opt("out")) return; // staging run: don't touch the shipped weights
+  if (opt('out')) return; // staging run: don't touch the shipped weights
   await Bun.write(
-    resolve(OUT, "models", cnnK ? "cnn-latest.json" : "latest.json"),
-    body,
+    resolve(OUT, 'models', cnnK ? 'cnn-latest.json' : 'latest.json'),
+    body
   );
-  const p = Bun.spawn(["bun", resolve(import.meta.dir, "shrink.ts"), path], {
-    stdout: "inherit",
-    stderr: "inherit",
+  const p = Bun.spawn(['bun', resolve(import.meta.dir, 'shrink.ts'), path], {
+    stdout: 'inherit',
+    stderr: 'inherit',
   });
-  if ((await p.exited) !== 0) throw new Error("shrink.ts failed");
+  if ((await p.exited) !== 0) throw new Error('shrink.ts failed');
 };
 
 const cfgs: Cfg[] = [];
-const parseHidden = (v: string) => v.split(",").filter(Boolean).map(Number);
-if (args.includes("--grid")) {
-  for (const hidden of ["16", "32", "32,32", "64,64"]) {
+const parseHidden = (v: string) => v.split(',').filter(Boolean).map(Number);
+if (args.includes('--grid')) {
+  for (const hidden of ['16', '32', '32,32', '64,64']) {
     for (const l2 of [1e-4, 1e-3]) {
       cfgs.push({ hidden: parseHidden(hidden), l2, lr: 2e-3, seed: 1 });
     }
   }
 } else {
   cfgs.push({
-    hidden: parseHidden(opt("hidden", "32,32")!),
-    l2: Number(opt("l2", "1e-3")),
-    lr: Number(opt("lr", "2e-3")),
-    seed: Number(opt("seed", "1")),
+    hidden: parseHidden(opt('hidden', '32,32')!),
+    l2: Number(opt('l2', '1e-3')),
+    lr: Number(opt('lr', '2e-3')),
+    seed: Number(opt('seed', '1')),
   });
 }
 
@@ -516,13 +636,13 @@ for (const cfg of cfgs) {
     `hidden=[${cfg.hidden}] l2=${cfg.l2} lr=${cfg.lr}: best epoch ${r.epoch} | train srcc ${tr.srcc.toFixed(4)} | val srcc ${r.best.srcc.toFixed(4)} [${r.best.per}] acc1/5 ${r.best.acc1_5.toFixed(1)} acc1/10 ${r.best.acc1_10.toFixed(1)}` +
       (r.best.hold
         ? ` | fcdb holdout IoU ${r.best.hold.top1.toFixed(4)}`
-        : "") +
-      ` (${((performance.now() - t0) / 1000).toFixed(0)}s)`,
+        : '') +
+      ` (${((performance.now() - t0) / 1000).toFixed(0)}s)`
   );
   if (!top || r.best.score > top.best.score) top = { ...r, cfg };
 }
 // --ensemble K: retrain the selected config with K seeds and average them.
-const K = Number(opt("ensemble", "1"));
+const K = Number(opt('ensemble', '1'));
 if (top && K > 1) {
   const nets: Net[] = [top.p];
   for (let k = 1; k < K; k++) {
@@ -533,23 +653,23 @@ if (top && K > 1) {
       `ensemble ${nets.length}: val srcc ${v.srcc.toFixed(4)} acc1/5 ${v.acc1_5.toFixed(1)} acc5 ${v.acc5.toFixed(1)} acc1/10 ${v.acc1_10.toFixed(1)}` +
         (fcHolds.length
           ? ` fcdb holdout IoU ${(fcHolds.reduce((s, d) => s + evaluate(nets, d).top1, 0) / fcHolds.length).toFixed(4)}`
-          : ""),
+          : '')
     );
   }
-  if (args.includes("--write")) {
+  if (args.includes('--write')) {
     const v = evalVal(nets);
     const model = toModel(nets[0]);
     model.members = nets.slice(1).map((q) => toModel(q).layers);
     await write(
       model,
-      `ensemble of ${K} x hidden=[${top.cfg.hidden}] l2=${top.cfg.l2} sets=${sets.join("+")} fcdb=${fcdbW}; val SRCC ${v.srcc.toFixed(3)}, val Acc1/5 ${v.acc1_5.toFixed(1)}, val Acc1/10 ${v.acc1_10.toFixed(1)}.`,
+      `ensemble of ${K} x hidden=[${top.cfg.hidden}] l2=${top.cfg.l2} sets=${sets.join('+')} fcdb=${fcdbW}; val SRCC ${v.srcc.toFixed(3)}, val Acc1/5 ${v.acc1_5.toFixed(1)}, val Acc1/10 ${v.acc1_10.toFixed(1)}.`
     );
   }
-} else if (top && args.includes("--write")) {
+} else if (top && args.includes('--write')) {
   const model = toModel(top.p);
   const tr = evaluate(top.p, train[0]);
   await write(
     model,
-    `hidden=[${top.cfg.hidden}] l2=${top.cfg.l2} sets=${sets.join("+")} fcdb=${fcdbW}; train SRCC ${tr.srcc.toFixed(3)}, val SRCC ${top.best.srcc.toFixed(3)}, val Acc1/5 ${top.best.acc1_5.toFixed(1)}, val Acc1/10 ${top.best.acc1_10.toFixed(1)}.`,
+    `hidden=[${top.cfg.hidden}] l2=${top.cfg.l2} sets=${sets.join('+')} fcdb=${fcdbW}; train SRCC ${tr.srcc.toFixed(3)}, val SRCC ${top.best.srcc.toFixed(3)}, val Acc1/5 ${top.best.acc1_5.toFixed(1)}, val Acc1/10 ${top.best.acc1_10.toFixed(1)}.`
   );
 }

@@ -4,6 +4,19 @@ import { join } from 'node:path';
 type Ort = typeof import('onnxruntime-node');
 type Session = import('onnxruntime-node').InferenceSession;
 
+/**
+ * Session options. SMARTCROP_ORT_THREADS caps onnxruntime's intra-op threads
+ * (default: onnxruntime's own choice, all cores); useful when several worker
+ * processes share a machine.
+ */
+export const sessionOptions = () => {
+  const t = Number(process.env.SMARTCROP_ORT_THREADS);
+  return {
+    logSeverityLevel: 3 as const,
+    ...(t > 0 ? { intraOpNumThreads: t, interOpNumThreads: 1 } : {}),
+  };
+};
+
 export const modelDir = join(import.meta.dir, '../../bench/models');
 
 let ortPromise: Promise<Ort> | undefined;
@@ -16,7 +29,7 @@ export const getSession = (path: string): Promise<Session> => {
   let s = sessions.get(path);
   if (!s) {
     s = getOrt().then((ort) =>
-      ort.InferenceSession.create(path, { logSeverityLevel: 3 })
+      ort.InferenceSession.create(path, sessionOptions())
     );
     sessions.set(path, s);
   }
