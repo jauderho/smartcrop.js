@@ -1,0 +1,20 @@
+{
+  "_doc": "type: float (min,max; scale linear|log; log uses offset o so 0 is reachable: zeroProb: chance of exactly min (0); v=(min+o)*((max+o)/(min+o))^u-o), int, bool, choice (values), fixed (value). Add any numeric Options key here without code changes.",
+  "fixed": { "maxScale": 1, "boostWeight": 100 },
+  "params": {
+    "detailWeight": { "type": "float", "min": 0, "max": 5 },
+    "skinWeight": { "type": "float", "min": 0, "max": 3 },
+    "saturationWeight": { "type": "float", "min": 0, "max": 1 },
+    "saliencyWeight": { "type": "float", "min": 0, "max": 5, "scale": "log", "offset": 0.1, "zeroProb": 0.3 },
+    "centerWeight": { "type": "float", "min": 0, "max": 2, "scale": "log", "offset": 0.1, "zeroProb": 0.3 },
+    "textureDamping": { "type": "float", "min": 0, "max": 2, "zeroProb": 0.3 },
+    "borderPenalty": { "type": "float", "min": 0, "max": 2, "scale": "log", "offset": 0.1, "zeroProb": 0.3 },
+    "edgeRadius": { "type": "float", "min": 0, "max": 0.6 },
+    "edgeWeight": { "type": "float", "min": -40, "max": 0 },
+    "outsideImportance": { "type": "float", "min": -1, "max": 0 },
+    "ruleOfThirds": { "type": "bool" },
+    "luminance": { "type": "choice", "values": ["classic", "rec709"] },
+    "minScale": { "type": "float", "min": 0.4, "max": 1 },
+    "scaleStep": { "type": "choice", "values": [0.05, 0.1] }
+  }
+}
