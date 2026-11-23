@@ -8,9 +8,6 @@ It can be used in the browser, in node or via a CLI.
 ![Example](https://29a.ch/sandbox/2014/smartcrop/example.jpg)
 Image: [https://www.flickr.com/photos/endogamia/5682480447/](https://www.flickr.com/photos/endogamia/5682480447) by Leon F. Cabeiro (N. Feans), licensed under CC-BY-2.0
 
-> **Note**
-> I'm currently working on a more advanced version of smartcrop.js based on machine learning. As part of that I'm looking for a large dataset of manually cropped images. If you know of such a dataset, please [let me know](https://29a.ch/about).
-
 ## Demos
 
 - [Smartcrop.js Test Suite](https://29a.ch/sandbox/2014/smartcrop/examples/testsuite.html), contains over 100 images, **heavy**.
@@ -35,6 +32,136 @@ Output:
 {topCrop: {x: 300, y: 200, height: 200, width: 200}}
 ```
 
+## Better crops: the learned scorer (3.1)
+
+This fork adds an opt-in scorer that picks crops people actually prefer. It
+_handily_ beats the original algorithm, which on public benchmarks barely beat
+an always-centred crop.
+
+```javascript
+const result = await smartcrop.crop(image, {
+  width: 1200,
+  height: 545,
+  ...smartcrop.PRESETS.next, // { scorer: 'learned' }
+});
+result.topCrop; // { x, y, width, height }
+result.position; // { x, y } as CSS object-position percentages
+```
+
+The default behaviour is unchanged: `smartcrop.PRESETS.classic` (or no
+preset) reproduces 2.0.5 crops exactly, and a golden test enforces that.
+
+### Results
+
+Held-out test sets that were never used to train or select anything. IoU is
+the overlap with a human crop (higher is better). GAICD measures how well a
+method ranks about 86 human-scored crops per photo.
+
+| method                               | GAICD SRCC | GAICD best pick in human top 5 |  FCDB IoU |  FLMS IoU |
+| ------------------------------------ | ---------: | -----------------------------: | --------: | --------: |
+| always centre                        |      0.432 |                          47.4% |     0.701 |     0.894 |
+| original (2.0.5 / `classic`)         |      0.369 |                          22.4% |     0.718 |     0.918 |
+| learned, pure JS                     |      0.623 |                          48.0% |     0.744 |     0.917 |
+| **learned + local faces & saliency** |  **0.739** |                      **50.4%** | **0.765** | **0.925** |
+
+By content type, on FCDB test (original → learned + faces & saliency):
+
+- people 0.761 → 0.795
+- faces 0.764 → 0.803
+- landscapes 0.693 → 0.749
+- photos with lots of sky 0.705 → 0.753
+
+On wide hero strips, the original tends to sink into textured foreground such
+as water, grass or gravel, cutting off sky, skylines and the tops of buildings
+and people. The learned scorer keeps them.
+
+### How it works
+
+The original scores a sliding window by Laplacian detail, a skin-colour
+detector and saturation. Texture therefore wins over subjects. The learned
+scorer instead describes each candidate crop with 117 features, computed from
+maps smartcrop already builds and read in constant time from summed-area
+tables:
+
+- **Subject:** how much salient mass the crop keeps, and how dense it is.
+- **Integrity:** salient mass, face boxes or detail cut by each crop edge.
+- **Boundary simplicity** (Fang et al., Adobe, ACM MM 2014): good crop edges
+  pass through plain, low-gradient regions.
+- **Composition:** subject centroid against the centre and the
+  rule-of-thirds points, balance, and the subject's bounding box and margins.
+- **Horizon:** the strongest horizontal edge against the ⅓, ½ and ⅔ lines.
+- **Faces:** cut fraction, headroom and size, from boost boxes.
+- **Geometry:** area ratio, offset and aspect.
+
+A small MLP (117 → 32 → 32 → 1) ranks the candidates. It was trained
+pairwise (RankNet) on about 231,000 human-scored crops from GAICD, plus FCDB
+crops. The weights ship in the source as 17 KB of float16, which is verified
+to make the same choices as the full-precision weights. After retraining (`bun bench/learned/train.ts --write`),
+`bun run weights:shrink` picks the smallest encoding (int8, float16 or float32)
+that keeps every validation choice unchanged.
+
+The model was selected on validation data only. Things tried and rejected by
+measurement:
+
+- blending in the hand-tuned classic score;
+- a 5-model ensemble (+0.005 SRCC for 5× the weights);
+- a hard content-preservation floor;
+- int8 weights, which changed about 1% of choices.
+
+Details: [docs/improvement-plan.md](docs/improvement-plan.md) and
+[docs/research-2026.md](docs/research-2026.md).
+
+### Optional local face and saliency models (Node)
+
+For offline or batch cropping, two small ONNX models run locally with
+onnxruntime-node, and no image leaves the machine:
+
+- YuNet faces, 0.2 MB;
+- U²-Netp salient objects, 4.6 MB.
+
+They lift the learned scorer to the best numbers in the table above.
+
+```sh
+bun scripts/fetch-models.ts   # downloads both models (checksummed) into bench/models/
+```
+
+```javascript
+import { detectFaces, faceBoosts } from "./plugins/onnx/faces";
+import { saliencyMap } from "./plugins/onnx/saliency";
+
+const imageData = ctx.getImageData(0, 0, width, height); // RGBA pixels
+const faces = await detectFaces(imageData);
+const result = await smartcrop.crop(canvas, {
+  width: 1200,
+  height: 545,
+  ...smartcrop.PRESETS.next,
+  boost: faceBoosts(faces, { imageWidth: width, imageHeight: height }),
+  importanceMap: await saliencyMap(imageData),
+});
+```
+
+These are opt-in and not dependencies of the core library, which stays plain
+JavaScript for the browser and Node.
+
+### Other additions
+
+- `result.position`: the crop as CSS `object-position` percentages (upstream
+  #45, #81, #99).
+- `candidates`: score your own list of crops (`result.crops` keeps the input
+  order).
+- Opt-in classic terms:
+  - `luminance: 'rec709'` fixes the luminance typo (#77);
+  - `centerWeight`, `textureDamping`, `saliencyWeight` (frequency-tuned
+    colour contrast), `borderPenalty`;
+  - `importanceMap` with `importanceMapWeight`.
+- An evaluation harness in `bench/`:
+  - FCDB, FLMS and GAICD benchmarks, with per-content subsets;
+  - a parameter tuner;
+  - a visual gallery comparing original and improved crops.
+
+  Datasets are downloaded by `scripts/fetch-datasets.ts`, and
+  `bun run clean` reclaims the disk space.
+
 ## Download/ Installation
 
 This fork is not published to npm; the `smartcrop` package on npm is the original 2.x release.
@@ -50,13 +177,13 @@ bun run build   # writes dist/
 ES module (`dist/smartcrop.js`):
 
 ```javascript
-import smartcrop from './smartcrop.js';
+import smartcrop from "./smartcrop.js";
 ```
 
 CommonJS (`dist/smartcrop.cjs`):
 
 ```javascript
-const smartcrop = require('./smartcrop.cjs');
+const smartcrop = require("./smartcrop.cjs");
 ```
 
 Browser, via a script tag (`dist/smartcrop.iife.js`, defines `window.smartcrop`):
@@ -165,6 +292,10 @@ You may not use cross-domain images without [CORS](https://en.wikipedia.org/wiki
 
 **ruleOfThirds:** optional boolean if set to false it will turn off the rule of thirds composition weight.
 
+**scorer:** `'classic'` (default, the original algorithm) or `'learned'` (see [the learned scorer](#better-crops-the-learned-scorer-31)). `smartcrop.PRESETS.next` selects the learned scorer.
+
+**importanceMap:** optional saliency or importance map `{ width, height, data }` (any size, values ≥ 0) used by the learned scorer and by `importanceMapWeight` in classic mode.
+
 **debug _(internal)_:** if true, the cropResult will contain debugOutput, debugOptions and debugTopCrop as well as the complete crops array.
 
 There are many more (for now undocumented) options available.
@@ -176,7 +307,8 @@ Result of the promise returned by smartcrop.crop.
 
 ```javascript
 {
-  topCrop: crop;
+  topCrop: crop,
+  position: { x: 50, y: 31.2 } // CSS object-position percentages of topCrop
 }
 ```
 
@@ -247,6 +379,13 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 - [dont-crop](https://github.com/jwagner/dont-crop/) a library to avoid cropping by padding images with matching colors or gradients
 
 ## Version history
+
+### 3.1.0 (unreleased)
+
+- Opt-in learned crop scorer (`scorer: 'learned'`, `PRESETS.next`), trained on human-rated crops.
+- Optional local ONNX face and saliency plug-ins (`plugins/onnx`).
+- `result.position`, `candidates`, and opt-in classic terms (`luminance`, `centerWeight`, `textureDamping`, `saliencyWeight`, `borderPenalty`, `importanceMap`).
+- Benchmark, tuning and gallery tooling in `bench/`.
 
 ### 3.0.0
 
