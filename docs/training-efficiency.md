@@ -258,3 +258,57 @@ Risks:
   counts are checked, but not the image contents.
 - `parallel` and `gate_margin` are not in the fingerprint (they do not change the
   weights); `force` replaces the cache entry only when the gate passes.
+
+## Laptop vs GitHub runner (measured 2026-11-23)
+
+Same code, config (workflow defaults, seed 1) and settings (4 inference
+processes x 1 ONNX thread, 4 dump processes). Laptop: Apple M2, 8 cores, via
+`bench/train-local.sh`. Runner: `ubuntu-latest` (x64, 4 vCPU), Train run 45167866047.
+
+| stage                | runner (x64) | laptop (M2)       |
+| -------------------- | ------------ | ----------------- |
+| dataset download     | 2m05s        | (already on disk) |
+| plug-in inference    | 8m09s        | 13m23s            |
+| feature dumps        | 46s          | 27s               |
+| training (30 epochs) | 3m11s        | 4m18s             |
+| whole job / pipeline | 14m25s       | 18m11s            |
+
+**Where outputs differ** (`bench/platform-probe.ts`, Platform probe run
+45167861456, 12 sample images, every stage compared bit for bit):
+
+- JPEG decode + resize, pure-JS features and classic/learned crops are
+  identical on every platform.
+- On arm64 (macOS runner, Linux arm runner, the M2 laptop) the ONNX outputs
+  (faces, saliency, CNN) are also bit-identical.
+- On x64 the ONNX kernels differ: saliency up to 2e-4, CNN up to 1.5e-5,
+  faces up to 4e-6. With faces/saliency/CNN + consensus, 3 of 12 crops moved
+  by 1 px.
+- The ONNX thread count also changes outputs on the laptop (1e-5), so the
+  thread setting is part of reproducibility.
+- Dump order used to depend on `--procs`; fixed (shards merge in input order).
+
+**Effect on the trained weights** (validation only):
+
+| run                | val SRCC | Acc1/5 | Acc1/10 | holdout IoU |
+| ------------------ | -------: | -----: | ------: | ----------: |
+| shipped            |   0.8072 |   55.0 |    71.5 |      0.7779 |
+| runner x64, seed 1 |   0.8017 |   48.0 |    69.5 |      0.7745 |
+| laptop, seed 1     |   0.8054 |   52.0 |    73.0 |      0.7759 |
+| laptop, seed 2     |   0.8073 |   49.0 |    71.5 |      0.7802 |
+| laptop, seed 3     |   0.8017 |   47.5 |    67.5 |      0.7798 |
+
+The laptop-vs-runner gap (0.004 SRCC, 4 images of 200 in Acc1/5) is inside
+the seed-to-seed spread (0.006 SRCC, 4.5 points). The platform matters less
+than the seed. The shipped weights sit at the top of that spread (they were
+picked from several runs), so a single-seed retrain usually fails a margin-0
+gate on either machine.
+
+**Recommendations**
+
+1. For bit-for-bit reproducibility with laptop runs, run Train on
+   `ubuntu-24.04-arm`; its outputs match the M2 exactly in the probe. Its
+   speed on a full run is not measured yet (the probe was slower on
+   saliency, 12.2s vs 6.7s for 12 images).
+2. Make the gate robust to seed noise: train an ensemble (e.g. 4 seeds, run
+   in parallel) or require the new model to beat the shipped one by more
+   than the seed spread, rather than single seed vs margin 0.
