@@ -41,8 +41,9 @@ if (!['strips', 'examples', 'fcdb', 'flms'].includes(set ?? '')) {
 const lib = await import(resolve(libPath ?? join(root, 'src/smartcrop.ts')));
 const smartcrop = lib.default ?? lib;
 // A preset name ending in "+fs" also feeds the local ONNX plug-ins (faces,
-// saliency), cached under bench/out/cache/gallery-<set>/.
-const baseName = (name: string) => name.replace(/\+fs$/, '');
+// saliency), "+fsc" adds the cnn feature map too (needs the cnn head in
+// src/learned-cnn-weights.ts); cached under bench/out/cache/gallery-<set>/.
+const baseName = (name: string) => name.replace(/\+fsc?$/, '');
 const optionsFor = (name: string): Record<string, unknown> =>
   baseName(name) === 'classic'
     ? {}
@@ -54,11 +55,15 @@ const pluginsFor = async (
   h: number,
   key: string
 ): Promise<Record<string, unknown>> =>
-  name.endsWith('+fs')
+  name.endsWith('+fs') || name.endsWith('+fsc')
     ? pluginOptions(
         `gallery-${set}`,
         key,
-        new Set(['faces', 'saliency'] as const),
+        new Set(
+          name.endsWith('+fsc')
+            ? (['faces', 'saliency', 'cnn'] as const)
+            : (['faces', 'saliency'] as const)
+        ),
         { width: w, height: h },
         async () => canvas.getContext('2d').getImageData(0, 0, w, h)
       )
