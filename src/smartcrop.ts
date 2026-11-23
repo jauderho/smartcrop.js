@@ -1386,18 +1386,20 @@ const DEFAULTS: Options = {
   textureDamping: 0,
   borderPenalty: 0,
   importanceMapWeight: 0,
-  scorer: 'classic',
+  scorer: 'learned',
   contentFloor: 0,
   classicBlend: 0,
   consensus: 0,
 };
 
 /**
- * Named option bundles. `next` collects improvements that change which crop
- * is picked; it is opt-in during 3.x: `crop(img, { ...PRESETS.next, width, height })`.
+ * Named option bundles. The learned scorer is the default since 4.0;
+ * `classic` reproduces the original algorithm's crops exactly:
+ * `crop(img, { ...PRESETS.classic, width, height })`. `next` is kept as an
+ * alias of the default.
  */
 const PRESETS: Record<'classic' | 'next', CropOptions> = {
-  classic: {},
+  classic: { scorer: 'classic' },
   // Learned composition scorer (trained on GAICD human ratings). Its maps use
   // the classic luminance, which the weights were trained with.
   next: { scorer: 'learned' },

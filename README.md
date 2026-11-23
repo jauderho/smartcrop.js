@@ -32,9 +32,9 @@ Output:
 {topCrop: {x: 300, y: 200, height: 200, width: 200}}
 ```
 
-## Better crops: the learned scorer (3.1)
+## Better crops: the learned scorer (4.0)
 
-This fork adds an opt-in scorer that picks crops people actually prefer. It
+This fork adds a learned scorer, the default since 4.0, that picks crops people actually prefer. It
 _handily_ beats the original algorithm, which on public benchmarks barely beat
 an always-centred crop.
 
@@ -42,14 +42,14 @@ an always-centred crop.
 const result = await smartcrop.crop(image, {
   width: 1200,
   height: 545,
-  ...smartcrop.PRESETS.next, // { scorer: 'learned' }
 });
 result.topCrop; // { x, y, width, height }
 result.position; // { x, y } as CSS object-position percentages
 ```
 
-The default behaviour is unchanged: `smartcrop.PRESETS.classic` (or no
-preset) reproduces 2.0.5 crops exactly, and a golden test enforces that.
+For the original algorithm, use `smartcrop.PRESETS.classic` (`{ scorer:
+'classic' }`). It reproduces 2.0.5 crops exactly, and a golden test enforces
+that.
 
 ### Results
 
@@ -137,7 +137,6 @@ const faces = await detectFaces(imageData);
 const result = await smartcrop.crop(canvas, {
   width: 1200,
   height: 545,
-  ...smartcrop.PRESETS.next,
   boost: faceBoosts(faces, { imageWidth: width, imageHeight: height }),
   importanceMap: await saliencyMap(imageData),
 });
@@ -332,7 +331,7 @@ You may not use cross-domain images without [CORS](https://en.wikipedia.org/wiki
 
 **ruleOfThirds:** optional boolean if set to false it will turn off the rule of thirds composition weight.
 
-**scorer:** `'classic'` (default, the original algorithm) or `'learned'` (see [the learned scorer](#better-crops-the-learned-scorer-31)). `smartcrop.PRESETS.next` selects the learned scorer.
+**scorer:** `'learned'` (default since 4.0; see [the learned scorer](#better-crops-the-learned-scorer-40)) or `'classic'` (the original algorithm, also `smartcrop.PRESETS.classic`). `PRESETS.next` is kept as an alias of the default.
 
 **importanceMap:** optional saliency or importance map `{ width, height, data }` (any size, values ≥ 0) used by the learned scorer and by `importanceMapWeight` in classic mode.
 
@@ -420,9 +419,9 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 
 ## Version history
 
-### 3.1.0 (unreleased)
+### 4.0.0 (unreleased)
 
-- Opt-in learned crop scorer (`scorer: 'learned'`, `PRESETS.next`), trained on human-rated crops.
+- Breaking: the learned crop scorer, trained on human-rated crops, is now the default. `PRESETS.classic` (`scorer: 'classic'`) keeps the original crops.
 - Optional local ONNX face, saliency and CNN-feature plug-ins (`plugins/onnx`), with pinned model checksums.
 - `result.position`, `candidates`, and opt-in classic terms (`luminance`, `centerWeight`, `textureDamping`, `saliencyWeight`, `borderPenalty`, `importanceMap`).
 - Benchmark, tuning and gallery tooling in `bench/`.

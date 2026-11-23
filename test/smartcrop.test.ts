@@ -72,12 +72,14 @@ describe('crop', () => {
     const thirds = await crop(c, {
       width: 32,
       height: 32,
+      scorer: 'classic',
       ruleOfThirds: true,
       debug: true,
     });
     const noThirds = await crop(c, {
       width: 32,
       height: 32,
+      scorer: 'classic',
       ruleOfThirds: false,
       debug: true,
     });
@@ -106,7 +108,12 @@ describe('crop', () => {
         weight: 1.0,
       },
     ];
-    const result = await crop(img, { boost, width: 64, height: 64 });
+    const result = await crop(img, {
+      scorer: 'classic',
+      boost,
+      width: 64,
+      height: 64,
+    });
     expectValidResult(result);
     expect(result.topCrop.y).toBe(0);
     expect(result.topCrop.x).toBe(200);
@@ -170,8 +177,9 @@ describe('importanceMap', () => {
     for (let y = 0; y < 10; y++) {
       for (let x = 0; x < 5; x++) map.data[y * 30 + x] = 1;
     }
-    const plain = await crop(c, { width: 100, height: 100 });
+    const plain = await crop(c, { scorer: 'classic', width: 100, height: 100 });
     const mapped = await crop(c, {
+      scorer: 'classic',
       width: 100,
       height: 100,
       importanceMap: map,
@@ -184,8 +192,8 @@ describe('importanceMap', () => {
 });
 
 describe('PRESETS', () => {
-  it('classic matches the defaults', async () => {
-    const a = await crop(img, { width: 100, height: 100 });
+  it('classic matches the classic scorer', async () => {
+    const a = await crop(img, { scorer: 'classic', width: 100, height: 100 });
     const b = await crop(img, {
       ...smartcrop.PRESETS.classic,
       width: 100,
@@ -194,9 +202,13 @@ describe('PRESETS', () => {
     expect(b.topCrop).toEqual(a.topCrop);
   });
 
-  it('next uses the learned scorer; the default stays classic', () => {
+  it('the default is the learned scorer; next is an alias', async () => {
+    expect(smartcrop.DEFAULTS.scorer).toBe('learned');
     expect(smartcrop.PRESETS.next.scorer).toBe('learned');
-    expect(smartcrop.DEFAULTS.scorer).toBe('classic');
+    expect(smartcrop.PRESETS.classic.scorer).toBe('classic');
+    const a = await crop(img, { width: 100, height: 100 });
+    const b = await crop(img, { scorer: 'learned', width: 100, height: 100 });
+    expect(a.topCrop).toEqual(b.topCrop);
   });
 });
 
@@ -359,7 +371,10 @@ describe('cnn deep features', () => {
     mean: new Array(D).fill(0),
     std: new Array(D).fill(1),
     layers: [
-      { w: Array.from({ length: D * 4 }, (_, i) => Math.cos(i) * 0.1), b: [0, 0.1, 0, 0] },
+      {
+        w: Array.from({ length: D * 4 }, (_, i) => Math.cos(i) * 0.1),
+        b: [0, 0.1, 0, 0],
+      },
       { w: [1, -1, 0.5, 0.25], b: [0] },
     ],
   };
@@ -398,7 +413,8 @@ describe('cnn deep features', () => {
     const base = await run({});
     const r = await run({ featureMap: fm, cnnModel });
     expect(r.crops).toHaveLength(3);
-    for (const c of r.crops!) expect(Number.isFinite(c.score!.total)).toBe(true);
+    for (const c of r.crops!)
+      expect(Number.isFinite(c.score!.total)).toBe(true);
     expect(r.crops!.map((c) => c.score!.total)).not.toEqual(
       base.crops!.map((c) => c.score!.total)
     );

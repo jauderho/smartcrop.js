@@ -47,7 +47,9 @@ export async function computeGolden(smartcrop: Cropper) {
     const img = await loadImage(path);
     const row: Record<string, number[]> = {};
     for (const [name, opts] of Object.entries(OPTION_SETS)) {
+      // Golden crops pin the classic algorithm (the default before 4.0).
       const { topCrop: c } = await smartcrop.crop(img, {
+        scorer: 'classic',
         ...opts,
         canvasFactory,
       });
