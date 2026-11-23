@@ -1,4 +1,4 @@
-# smartcrop.js
+# smartcrop.js [Forked]
 
 ![example workflow](https://github.com/jwagner/smartcrop.js/actions/workflows/tests.yml/badge.svg)
 
