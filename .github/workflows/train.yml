@@ -4,23 +4,30 @@ name: Train
 # depends on one laptop. Manual only: never on push, pull_request or schedule.
 #
 # Data policy (see docs/training-efficiency.md):
-#   * GAICD, FCDB and FLMS are downloaded fresh in every run, used inside the
-#     one job that downloaded them, and die with the runner. They are never put
-#     in actions/cache or in artifacts, and neither is anything derived from
-#     them (plug-in caches, feature dumps).
+#   * GAICD and FCDB are downloaded fresh in every run by each inference job
+#     and die with its runner. They are never put in actions/cache. Raw images
+#     and plug-in caches never leave a runner. Feature-dump shards (derived
+#     from the datasets) pass between the jobs of one run as artifacts with
+#     retention-days 1, and the cleanup job deletes them at the end of the run.
 #   * Only the ONNX models (pinned sha256), bun's package cache, and the trained
-#     weights + metrics are cached or uploaded.
+#     weights + metrics are cached across runs.
 #   * Nothing is committed or pushed. The owner reviews the artifact, then
 #     commits src/learned-cnn-weights.ts (or learned-weights.ts) and
 #     src/weights-manifest.json by hand.
 #
-# Shape: one job. Estimated 1.5 to 3 h on a 4 vCPU runner (limit 6 h): fetch,
-# plug-in inference on 4 processes, feature dump, K ensemble members trained in
-# parallel (one process each), combine, validation gate, shrink. Each stage is
-# minutes to tens of minutes, so no intra-training checkpoint is needed; if the
-# job fails, re-running it repeats at most one run (the weights cache below
-# makes a repeat of a *finished* configuration free).
-
+# Shape: parallel jobs, all on arm64.
+#   plan     validate inputs, fingerprint, weights cache lookup
+#   pca      (only with refit_pca) fit the cnn projection once
+#   infer    matrix of infer_jobs jobs; each downloads the two datasets it needs
+#            and runs 4 processes x 1 ONNX thread: plug-in inference + feature
+#            dump of its shards (--shard s/S, S = 4 * infer_jobs)
+#   train    matrix, one job per ensemble member; merges the dump shards
+#            (dump.ts --merge S) and trains one seed
+#   finish   merge, combine, gate, shrink, manifest, artifact, weights cache
+#   cleanup  always: deletes every artifact of this run except the weights
+# The dump merges shards in input order, so the dumps (and the weights) do not
+# depend on infer_jobs; see docs/training-efficiency.md.
+#
 on:
   workflow_dispatch:
     inputs:
@@ -65,7 +72,7 @@ on:
         type: boolean
         default: false
       ensemble:
-        description: 'ensemble members (seeds seed .. seed+N-1, trained in parallel); averaging seeds cuts training noise'
+        description: 'ensemble members (seeds seed .. seed+N-1, one job each); averaging seeds cuts training noise'
         default: '4'
         required: true
       seed:
@@ -80,9 +87,9 @@ on:
         description: 'fail when the new model scores below the shipped one by more than this (val SRCC + holdout IoU); 0.01 is the measured seed-to-seed spread'
         default: '0.01'
         required: true
-      parallel:
-        description: 'training processes at once (about 2 GB RAM each)'
-        default: '4'
+      infer_jobs:
+        description: 'inference jobs (4 processes each); the result does not depend on it'
+        default: '8'
         required: true
       force:
         description: 'retrain even if weights for this fingerprint are cached'
@@ -96,33 +103,40 @@ concurrency:
   group: train
   cancel-in-progress: false
 
+env:
+  IN_CNN: ${{ inputs.cnn }}
+  IN_HIDDEN: ${{ inputs.hidden }}
+  IN_L2: ${{ inputs.l2 }}
+  IN_LR: ${{ inputs.lr }}
+  IN_EPOCHS: ${{ inputs.epochs }}
+  IN_FCDB: ${{ inputs.fcdb }}
+  IN_PPI: ${{ inputs.ppi }}
+  IN_LAMBDA: ${{ inputs.lambda }}
+  IN_EMA: ${{ inputs.ema }}
+  IN_COSINE: ${{ inputs.cosine }}
+  IN_ENSEMBLE: ${{ inputs.ensemble }}
+  IN_SEED: ${{ inputs.seed }}
+  IN_REFIT: ${{ inputs.refit_pca }}
+  IN_TOLERANCE: ${{ inputs.gate_tolerance }}
+  IN_INFER_JOBS: ${{ inputs.infer_jobs }}
+  IN_FORCE: ${{ inputs.force }}
+  GH_TOKEN: ${{ github.token }}
+  # plug-in outputs depend on the ONNX thread count: 1 everywhere
+  SMARTCROP_ORT_THREADS: '1'
+
+# arm64: ONNX outputs match Apple Silicon laptops bit for bit (x64 kernels
+# differ slightly), so runner and laptop training are reproducible.
 jobs:
-  train:
-    # arm64: ONNX outputs match Apple Silicon laptops bit for bit (x64 kernels
-    # differ slightly), so runner and laptop training are reproducible.
+  plan:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 345
-    permissions:
-      contents: read
-      actions: write # delete a stale weights cache entry on force
-    env:
-      IN_CNN: ${{ inputs.cnn }}
-      IN_HIDDEN: ${{ inputs.hidden }}
-      IN_L2: ${{ inputs.l2 }}
-      IN_LR: ${{ inputs.lr }}
-      IN_EPOCHS: ${{ inputs.epochs }}
-      IN_FCDB: ${{ inputs.fcdb }}
-      IN_PPI: ${{ inputs.ppi }}
-      IN_LAMBDA: ${{ inputs.lambda }}
-      IN_EMA: ${{ inputs.ema }}
-      IN_COSINE: ${{ inputs.cosine }}
-      IN_ENSEMBLE: ${{ inputs.ensemble }}
-      IN_SEED: ${{ inputs.seed }}
-      IN_REFIT: ${{ inputs.refit_pca }}
-      IN_TOLERANCE: ${{ inputs.gate_tolerance }}
-      IN_PARALLEL: ${{ inputs.parallel }}
-      IN_FORCE: ${{ inputs.force }}
-      GH_TOKEN: ${{ github.token }}
+    timeout-minutes: 20
+    outputs:
+      config: ${{ steps.fp.outputs.config }}
+      fp: ${{ steps.fp.outputs.fp }}
+      short: ${{ steps.fp.outputs.short }}
+      hit: ${{ steps.wcache.outputs.cache-hit == 'true' }}
+      infer_matrix: ${{ steps.fp.outputs.infer_matrix }}
+      seed_matrix: ${{ steps.fp.outputs.seed_matrix }}
     steps:
       - uses: actions/checkout@v5
 
@@ -130,25 +144,16 @@ jobs:
         run: |
           set -eu
           re='^[0-9.,e+-]+$'
-          for v in IN_CNN IN_HIDDEN IN_L2 IN_LR IN_EPOCHS IN_FCDB IN_PPI IN_LAMBDA IN_EMA IN_ENSEMBLE IN_SEED IN_TOLERANCE IN_PARALLEL; do
+          for v in IN_CNN IN_HIDDEN IN_L2 IN_LR IN_EPOCHS IN_FCDB IN_PPI IN_LAMBDA IN_EMA IN_ENSEMBLE IN_SEED IN_TOLERANCE IN_INFER_JOBS; do
             val="${!v}"
             if ! printf '%s' "$val" | grep -Eq "$re"; then
               echo "::error::$v='$val' is not a plain number"; exit 1
             fi
           done
           [ "$IN_ENSEMBLE" -ge 1 ] && [ "$IN_ENSEMBLE" -le 16 ] || { echo "::error::ensemble must be 1..16"; exit 1; }
-          [ "$IN_PARALLEL" -ge 1 ] && [ "$IN_PARALLEL" -le 4 ] || { echo "::error::parallel must be 1..4 (4 vCPU, 16 GB)"; exit 1; }
+          [ "$IN_INFER_JOBS" -ge 1 ] && [ "$IN_INFER_JOBS" -le 32 ] || { echo "::error::infer_jobs must be 1..32"; exit 1; }
 
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Cache bun packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
 
       - name: Fingerprint
         id: fp
@@ -168,6 +173,8 @@ jobs:
             echo "config=$config"
             echo "fp=$fp"
             echo "short=${fp:0:12}"
+            echo "infer_matrix=$(jq -cn --argjson n "$IN_INFER_JOBS" '[range(0; $n)]')"
+            echo "seed_matrix=$(jq -cn --argjson s "$IN_SEED" --argjson n "$IN_ENSEMBLE" '[range($s; $s + $n)]')"
           } >> "$GITHUB_OUTPUT"
           echo "fingerprint $fp"
           echo "$config"
@@ -190,36 +197,59 @@ jobs:
             cat out/weights/gate.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ---- everything below runs only when there is nothing cached ----------
-      - name: Cache ONNX models (keyed on the pinned sha256 values)
-        id: modelkey
-        if: steps.wcache.outputs.cache-hit != 'true'
-        run: |
-          key=$(grep -oE "sha256: '[0-9a-f]{64}'" scripts/fetch-models.ts | sort | sha256sum | cut -d' ' -f1)
-          echo "key=$key" >> "$GITHUB_OUTPUT"
-
-      - name: Restore ONNX models
-        if: steps.wcache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
+      - name: Upload the cached weights and metrics
+        if: steps.wcache.outputs.cache-hit == 'true'
+        uses: actions/upload-artifact@v4
         with:
-          path: bench/models
-          key: onnx-models-${{ steps.modelkey.outputs.key }}
+          name: trained-weights-${{ steps.fp.outputs.short }}
+          path: out/weights
+          retention-days: 30
 
-      - name: Fetch models (verifies the pinned sha256)
-        if: steps.wcache.outputs.cache-hit != 'true'
-        run: bun scripts/fetch-models.ts
+  # Refit of the cnn projection on GAICD-train (once, so that every shard uses
+  # the same one). Skipped by default: the shipped projection is reused.
+  pca:
+    needs: plan
+    if: needs.plan.outputs.hit != 'true' && inputs.cnn != '0' && inputs.refit_pca
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+        with:
+          models: 'true'
+      - name: Download GAICD (fresh; never cached)
+        run: bun scripts/fetch-datasets.ts gaicd --clean-archives --concurrency 4
+      - name: Fit the projection
+        run: bun bench/learned/cnn-pca.ts
+      - name: Share the projection within this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: projection
+          path: bench/out/cnn/projection.bin
+          retention-days: 1
+
+  infer:
+    needs: [plan, pca]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.hit != 'true' && (needs.pca.result == 'success' || needs.pca.result == 'skipped') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    strategy:
+      matrix:
+        job: ${{ fromJSON(needs.plan.outputs.infer_matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+        with:
+          models: 'true'
 
       - name: Download datasets (fresh; never cached)
-        if: steps.wcache.outputs.cache-hit != 'true'
-        timeout-minutes: 150
+        timeout-minutes: 60
         run: |
           df -h .
-          bun scripts/fetch-datasets.ts gaicd fcdb flms --clean-archives --concurrency 4
-          df -h .
+          bun scripts/fetch-datasets.ts gaicd fcdb --clean-archives --concurrency 4
           du -sh bench/datasets/*
 
       - name: Check the downloaded datasets are complete
-        if: steps.wcache.outputs.cache-hit != 'true'
         run: |
           # The gate compares against weights trained on the full splits; dead
           # Flickr links would silently change the data. Loosen on purpose only.
@@ -230,38 +260,82 @@ jobs:
           console.log('gaicd', g, 'fcdb', f);
           if (g.train !== 2636 || g.val !== 200 || f.train !== 1369) { console.error('dataset splits are incomplete'); process.exit(1) }"
 
-      - name: PCA projection of the cnn head
-        if: steps.wcache.outputs.cache-hit != 'true' && inputs.cnn != '0'
+      - name: Projection (refit from the pca job, or the shipped one)
+        if: inputs.cnn != '0' && inputs.refit_pca
+        uses: actions/download-artifact@v5
+        with:
+          name: projection
+          path: bench/out/cnn
+
+      - name: Projection (shipped)
+        if: inputs.cnn != '0' && !inputs.refit_pca
+        run: bun bench/learned/projection-from-shipped.ts
+
+      - name: Plug-in inference and feature dump of this job's shards, 4 processes x 1 thread
+        timeout-minutes: 90
         run: |
-          if [ "$IN_REFIT" = "true" ]; then
-            bun bench/learned/cnn-pca.ts
+          # shellcheck disable=SC2086,SC2016
+          set -eu
+          S=$((IN_INFER_JOBS * 4))
+          if [ "$IN_CNN" != "0" ]; then
+            with="--with faces,saliency,cnn --cnnk $IN_CNN"
           else
-            bun bench/learned/projection-from-shipped.ts
+            with=""
           fi
-
-      - name: Plug-in inference (faces, saliency, cnn), 4 processes x 1 thread
-        if: steps.wcache.outputs.cache-hit != 'true' && inputs.cnn != '0'
-        timeout-minutes: 120
-        env:
-          SMARTCROP_ORT_THREADS: '1'
-        run: |
-          # shellcheck disable=SC2086,SC2016
-          set -eu
-          for job in "gaicd train" "gaicd val" "fcdb train"; do
-            set -- $job
-            for k in 0 1 2 3; do
-              bun bench/precompute.ts "$1" --split "$2" --shard "$k/4" &
+          # Shard s of S is every S-th image starting at s, in every dataset
+          # and split. Caches are per image, so shards never overlap.
+          shard() {
+            s=$1
+            for job in "gaicd train" "gaicd val" "fcdb train"; do
+              set -- $job
+              if [ "$IN_CNN" != "0" ]; then
+                bun bench/precompute.ts "$1" --split "$2" --shard "$s/$S"
+              fi
+              bun bench/learned/dump.ts --dataset "$1" --split "$2" $with --shard "$s/$S"
             done
-            wait
+          }
+          pids=""
+          for p in 0 1 2 3; do
+            shard $((${{ matrix.job }} * 4 + p)) &
+            pids="$pids $!"
           done
-          du -sh bench/out/cache
+          rc=0
+          for pid in $pids; do wait "$pid" || rc=1; done
+          [ "$rc" = 0 ] || { echo "::error::a shard failed"; exit 1; }
+          du -sh bench/out/cache bench/out/learned
 
-      - name: Feature dumps
-        if: steps.wcache.outputs.cache-hit != 'true'
-        timeout-minutes: 60
+      - name: Share the dump shards within this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: shards-${{ matrix.job }}
+          path: bench/out/learned/*.shard*
+          retention-days: 1
+          compression-level: 1
+          if-no-files-found: error
+
+  train:
+    needs: [plan, infer]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    strategy:
+      matrix:
+        seed: ${{ fromJSON(needs.plan.outputs.seed_matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      - name: Download the dump shards of this run
+        uses: actions/download-artifact@v5
+        with:
+          pattern: shards-*
+          merge-multiple: true
+          path: bench/out/learned
+
+      - name: Merge the dump shards
         run: |
           # shellcheck disable=SC2086,SC2016
           set -eu
+          S=$((IN_INFER_JOBS * 4))
           if [ "$IN_CNN" != "0" ]; then
             with="--with faces,saliency,cnn --cnnk $IN_CNN"
           else
@@ -269,30 +343,83 @@ jobs:
           fi
           for job in "gaicd train" "gaicd val" "fcdb train"; do
             set -- $job
-            bun bench/learned/dump.ts --dataset "$1" --split "$2" $with --procs 4 --force
+            bun bench/learned/dump.ts --dataset "$1" --split "$2" $with --merge "$S"
           done
-          # raw images and plug-in caches are not needed past this point
-          rm -rf bench/out/cache bench/datasets
-          du -sh bench/out/learned; df -h .
+          ls -la bench/out/learned
 
-      - name: Train ensemble members in parallel
-        if: steps.wcache.outputs.cache-hit != 'true'
-        timeout-minutes: 240
+      - name: Train ensemble member (seed ${{ matrix.seed }})
         run: |
           # shellcheck disable=SC2086,SC2016
           set -eu
-          mkdir -p out/members out/weights
+          mkdir -p out/members
           flags="--hidden $IN_HIDDEN --l2 $IN_L2 --lr $IN_LR --epochs $IN_EPOCHS --fcdb $IN_FCDB --ppi $IN_PPI --lambda $IN_LAMBDA --ema $IN_EMA"
           [ "$IN_CNN" != "0" ] && flags="$flags --cnn $IN_CNN"
           [ "$IN_COSINE" = "true" ] && flags="$flags --cosine"
-          export TRAIN_FLAGS="$flags"
           echo "train.ts $flags"
-          seq "$IN_SEED" $((IN_SEED + IN_ENSEMBLE - 1)) | xargs -P "$IN_PARALLEL" -I{} sh -c \
-            'bun bench/learned/train.ts $TRAIN_FLAGS --seed {} --write --out out/members/m{}.json > out/members/m{}.log 2>&1 || { echo "member {} failed"; tail -20 out/members/m{}.log; exit 1; }'
-          grep -h '^hidden=' out/members/m*.log
+          seed=${{ matrix.seed }}
+          bun bench/learned/train.ts $flags --seed "$seed" --write --out "out/members/m$seed.json" > "out/members/m$seed.log" 2>&1 || { echo "member $seed failed"; tail -20 "out/members/m$seed.log"; exit 1; }
+          grep -h '^hidden=' "out/members/m$seed.log"
+
+      - name: Share the member within this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: member-${{ matrix.seed }}
+          path: out/members
+          retention-days: 1
+          if-no-files-found: error
+
+  finish:
+    needs: [plan, train]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: write # delete a stale weights cache entry on force
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      - name: Download the dump shards of this run
+        uses: actions/download-artifact@v5
+        with:
+          pattern: shards-*
+          merge-multiple: true
+          path: bench/out/learned
+
+      - name: Download the ensemble members of this run
+        uses: actions/download-artifact@v5
+        with:
+          pattern: member-*
+          merge-multiple: true
+          path: out/members
+
+      - name: Merge the dump shards used by the gate
+        run: |
+          # shellcheck disable=SC2086,SC2016
+          set -eu
+          S=$((IN_INFER_JOBS * 4))
+          if [ "$IN_CNN" != "0" ]; then
+            with="--with faces,saliency,cnn --cnnk $IN_CNN"
+          else
+            with=""
+          fi
+          for job in "gaicd val" "fcdb train"; do
+            set -- $job
+            bun bench/learned/dump.ts --dataset "$1" --split "$2" $with --merge "$S"
+          done
+
+      - name: Projection (refit from the pca job, or the shipped one)
+        if: inputs.cnn != '0' && inputs.refit_pca
+        uses: actions/download-artifact@v5
+        with:
+          name: projection
+          path: bench/out/cnn
+
+      - name: Projection (shipped)
+        if: inputs.cnn != '0' && !inputs.refit_pca
+        run: bun bench/learned/projection-from-shipped.ts
 
       - name: Combine members
-        if: steps.wcache.outputs.cache-hit != 'true'
         run: |
           # shellcheck disable=SC2086,SC2016
           set -eu
@@ -301,7 +428,6 @@ jobs:
 
       - name: Validation gate (new vs shipped, validation data only)
         id: gate
-        if: steps.wcache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
           set -eu
@@ -309,28 +435,27 @@ jobs:
             --tolerance "$IN_TOLERANCE" --report out/weights/gate.json --markdown out/weights/gate.md
 
       - name: Shrink to packed weights and write the manifest
-        if: steps.wcache.outputs.cache-hit != 'true'
         run: |
           set -eu
           if [ "$IN_CNN" != "0" ]; then w=learned-cnn-weights.ts; else w=learned-weights.ts; fi
           bun bench/learned/shrink.ts out/weights/model-full.json --out "out/weights/$w" | tee out/weights/shrink.log
           cp src/weights-manifest.json out/weights/weights-manifest.json 2>/dev/null || true
-          bun scripts/weights-fingerprint.ts --write --config '${{ steps.fp.outputs.config }}' \
+          bun scripts/weights-fingerprint.ts --write --config '${{ needs.plan.outputs.config }}' \
             --weights "out/weights/$w" --manifest out/weights/weights-manifest.json \
             --metrics "$(cat out/weights/gate.json)"
           cp out/members/*.log out/weights/ 2>/dev/null || true
-          echo '${{ steps.fp.outputs.config }}' > out/weights/config.json
-          echo "${{ steps.fp.outputs.fp }}" > out/weights/fingerprint.txt
+          echo '${{ needs.plan.outputs.config }}' > out/weights/config.json
+          echo "${{ needs.plan.outputs.fp }}" > out/weights/fingerprint.txt
 
       - name: Job summary
-        if: always() && steps.wcache.outputs.cache-hit != 'true'
+        if: always()
         run: |
           # shellcheck disable=SC2086,SC2016
           {
             echo "### Training result"
-            echo "Fingerprint \`${{ steps.fp.outputs.fp }}\`"
+            echo "Fingerprint \`${{ needs.plan.outputs.fp }}\`"
             echo
-            echo '```json'; cat out/weights/config.json 2>/dev/null || echo '${{ steps.fp.outputs.config }}'; echo '```'
+            echo '```json'; cat out/weights/config.json 2>/dev/null || echo '${{ needs.plan.outputs.config }}'; echo '```'
             echo
             cat out/weights/gate.md 2>/dev/null || echo "gate did not run"
             echo
@@ -352,24 +477,56 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trained-weights-${{ steps.fp.outputs.short }}
+          name: trained-weights-${{ needs.plan.outputs.short }}
           path: out/weights
           retention-days: 30
           if-no-files-found: warn
 
       - name: Drop a stale cache entry (force)
         if: inputs.force && steps.gate.outcome == 'success'
-        run: gh cache delete "weights-${{ steps.fp.outputs.fp }}" || true
+        run: gh cache delete "weights-${{ needs.plan.outputs.fp }}" || true
 
       - name: Store weights in the cache (only if the gate passed)
-        if: steps.wcache.outputs.cache-hit != 'true' && steps.gate.outcome == 'success'
+        if: steps.gate.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: out/weights
-          key: weights-${{ steps.fp.outputs.fp }}
+          key: weights-${{ needs.plan.outputs.fp }}
 
       - name: Fail the run when the gate failed
         if: steps.gate.outcome == 'failure'
         run: |
           echo "::error::The new model does not beat the shipped one on validation (see the summary). The artifact is kept for inspection; it was not cached."
           exit 1
+
+  # Data policy: nothing derived from the datasets may outlive the run. Delete
+  # every artifact of this run except the trained weights and metrics.
+  cleanup:
+    needs: [plan, pca, infer, train, finish]
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      actions: write
+    steps:
+      - name: Delete this run's intermediate artifacts
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -eu
+          ids=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name | startswith("trained-weights-") | not) | "\(.id) \(.name)"')
+          [ -n "$ids" ] || { echo "no intermediate artifacts"; exit 0; }
+          fail=0
+          while read -r id name; do
+            if gh api -X DELETE "repos/$REPO/actions/artifacts/$id" >/dev/null; then
+              echo "deleted $name ($id)"
+            else
+              echo "::error::could not delete $name ($id)"; fail=1
+            fi
+          done <<< "$ids"
+          left=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '[.artifacts[] | select(.name | startswith("trained-weights-") | not)] | length')
+          echo "intermediate artifacts left: $left"
+          [ "$fail" = 0 ] && [ "$left" = 0 ]
