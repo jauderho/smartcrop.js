@@ -186,6 +186,9 @@ async function work(entries: Entry[], k: number, n: number, file: string) {
         width: img.width,
         height: img.height,
         canvasFactory,
+        // Built-in JS saliency only when asked for (--with jssal), so the
+        // other dumps keep their meaning.
+        jsSaliency: withSet.has('jssal'),
         ...po,
         ...(cnnK ? { cnnK } : {}),
       }

@@ -41,7 +41,9 @@ const cnnK = Number(opt('cnn', '0'));
 const fcdbW = Number(opt('fcdb', '0'));
 const tolerance = Number(opt('tolerance', '0'));
 const OUT = resolve(opt('dumps') ?? resolve(import.meta.dir, '../out/learned'));
-const suffix = cnnK ? `-faces+saliency+cnn${cnnK === 3 ? '' : cnnK}` : '';
+// --suffix overrides the dump-name suffix (e.g. -jssal for experiments).
+const suffix =
+  opt('suffix') ?? (cnnK ? `-faces+saliency+cnn${cnnK === 3 ? '' : cnnK}` : '');
 
 type DataSet = {
   D: number;

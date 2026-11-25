@@ -18,7 +18,7 @@ export type ImageDataLike = {
   height: number;
   data: Uint8ClampedArray;
 };
-export type Plugin = 'faces' | 'saliency' | 'cnn';
+export type Plugin = 'faces' | 'saliency' | 'cnn' | 'jssal';
 
 // Cached with a low threshold; consumers filter with a minimum score.
 export const CACHE_FACE_THRESHOLD = 0.5;
@@ -119,7 +119,7 @@ export const hasCache = (dataset: string, key: string, p: Plugin) =>
 export function parseWith(v: string | undefined): Set<Plugin> {
   const set = new Set<Plugin>();
   for (const p of (v ?? '').split(',').filter(Boolean)) {
-    if (p !== 'faces' && p !== 'saliency' && p !== 'cnn')
+    if (p !== 'faces' && p !== 'saliency' && p !== 'cnn' && p !== 'jssal')
       throw new Error(`unknown plugin ${p}`);
     set.add(p);
   }
@@ -165,6 +165,9 @@ export async function pluginOptions(
   if (use.has('saliency')) {
     opts.importanceMap = await loadSaliency(dataset, key, getData);
   }
+  // The library's built-in pure-JS saliency (src/saliency.ts); callers that
+  // dump training features turn it off unless 'jssal' is asked for.
+  if (use.has('jssal')) opts.jsSaliency = true;
   if (use.has('cnn')) {
     opts.featureMap = await loadCnn(dataset, key, getData);
     // Head weights: a staged model (SMARTCROP_CNN_MODEL=path to a PackedCnn
