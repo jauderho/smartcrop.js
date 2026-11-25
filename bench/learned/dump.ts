@@ -42,7 +42,11 @@ const dataset = opt('dataset', 'gaicd')!;
 const split = opt('split', 'train')!;
 const withSet = parseWith(opt('with'));
 const limit = Number(opt('limit', '0'));
-const procs = Number(opt('procs', '8'));
+// --merge N: only merge the N shard files (<name>.shard0 .. N-1) that
+// `--shard k/N` runs left in --outdir, possibly from different machines. Needs
+// no dataset, writes no .key.
+const merging = opt('merge') !== undefined;
+const procs = Number(opt('merge') ?? opt('procs', '8'));
 const shard = opt('shard');
 const OUT = resolve(
   opt('outdir') ?? resolve(import.meta.dir, '../out/learned')
@@ -210,57 +214,60 @@ async function work(entries: Entry[], k: number, n: number, file: string) {
 }
 
 await mkdir(OUT, { recursive: true });
-const entries = await loadEntries();
+const entries = merging ? [] : await loadEntries();
 if (shard) {
   const [k, n] = shard.split('/').map(Number);
   await work(entries, k, n, join(OUT, `${name}.shard${k}`));
   process.exit(0);
 }
-const fileSha = async (p: string) =>
-  existsSync(p)
-    ? new Bun.CryptoHasher('sha256')
-        .update(await Bun.file(p).bytes())
-        .digest('hex')
-    : 'none';
-const key = await featureKey({
-  dataset,
-  split,
-  with: [...withSet].sort().join(','),
-  cnnK,
-  limit,
-  inputs: await fileSha(
-    join(DIR, dataset === 'gaicd' ? 'candidates.json' : 'annotations.json')
-  ),
-  projection: cnnK ? await fileSha(PROJECTION_FILE) : 'none',
-});
-if (
-  !args.includes('--force') &&
-  existsSync(join(OUT, `${name}.bin`)) &&
-  existsSync(join(OUT, `${name}.json`)) &&
-  existsSync(join(OUT, `${name}.key`)) &&
-  (await readFile(join(OUT, `${name}.key`), 'utf8')).trim() === key
-) {
-  console.log(
-    `${name}: up to date (key ${key.slice(0, 12)}), skipping; --force to recompute`
-  );
-  process.exit(0);
-}
 const t0 = performance.now();
-const childArgs = args.filter(
-  (a, i) => a !== '--procs' && args[i - 1] !== '--procs'
-);
-await Promise.all(
-  Array.from({ length: procs }, async (_, k) => {
-    const p = Bun.spawn(
-      ['bun', import.meta.path, ...childArgs, '--shard', `${k}/${procs}`],
-      {
-        stdout: 'inherit',
-        stderr: 'inherit',
-      }
+let key = '';
+if (!merging) {
+  const fileSha = async (p: string) =>
+    existsSync(p)
+      ? new Bun.CryptoHasher('sha256')
+          .update(await Bun.file(p).bytes())
+          .digest('hex')
+      : 'none';
+  key = await featureKey({
+    dataset,
+    split,
+    with: [...withSet].sort().join(','),
+    cnnK,
+    limit,
+    inputs: await fileSha(
+      join(DIR, dataset === 'gaicd' ? 'candidates.json' : 'annotations.json')
+    ),
+    projection: cnnK ? await fileSha(PROJECTION_FILE) : 'none',
+  });
+  if (
+    !args.includes('--force') &&
+    existsSync(join(OUT, `${name}.bin`)) &&
+    existsSync(join(OUT, `${name}.json`)) &&
+    existsSync(join(OUT, `${name}.key`)) &&
+    (await readFile(join(OUT, `${name}.key`), 'utf8')).trim() === key
+  ) {
+    console.log(
+      `${name}: up to date (key ${key.slice(0, 12)}), skipping; --force to recompute`
     );
-    if ((await p.exited) !== 0) throw new Error(`shard ${k} failed`);
-  })
-);
+    process.exit(0);
+  }
+  const childArgs = args.filter(
+    (a, i) => a !== '--procs' && args[i - 1] !== '--procs'
+  );
+  await Promise.all(
+    Array.from({ length: procs }, async (_, k) => {
+      const p = Bun.spawn(
+        ['bun', import.meta.path, ...childArgs, '--shard', `${k}/${procs}`],
+        {
+          stdout: 'inherit',
+          stderr: 'inherit',
+        }
+      );
+      if ((await p.exited) !== 0) throw new Error(`shard ${k} failed`);
+    })
+  );
+}
 // Merge back into input order (shard k holds images k, k + procs, ...), so
 // the dump is identical whatever --procs is.
 const shards: { images: any[]; bin: Float32Array }[] = [];
@@ -274,11 +281,18 @@ for (let k = 0; k < procs; k++) {
   await rm(base + '.json');
   await rm(base + '.bin');
 }
+const count = shards.reduce((s, x) => s + x.images.length, 0);
+// shard k must hold images k, k + procs, ...: sizes ceil((count - k) / procs)
+shards.forEach((x, k) => {
+  if (x.images.length !== Math.max(0, Math.ceil((count - k) / procs)))
+    throw new Error(
+      `shard ${k}/${procs} has ${x.images.length} images of ${count}: wrong or missing shards`
+    );
+});
 const total = shards.reduce((s, x) => s + x.bin.length, 0);
 const all = new Float32Array(total);
 const metas: any[] = [];
 let off = 0;
-const count = shards.reduce((s, x) => s + x.images.length, 0);
 for (let i = 0; i < count; i++) {
   const sh = shards[i % procs];
   const im = sh.images[Math.floor(i / procs)];
@@ -291,7 +305,7 @@ await Bun.write(
   join(OUT, `${name}.json`),
   JSON.stringify({ D: DIM, names: FEATURE_NAMES, images: metas })
 );
-await Bun.write(join(OUT, `${name}.key`), key + '\n');
+if (!merging) await Bun.write(join(OUT, `${name}.key`), key + '\n');
 console.log(
   `${name}: ${metas.length} images, ${off} candidates, ${((performance.now() - t0) / 1000).toFixed(1)}s`
 );
