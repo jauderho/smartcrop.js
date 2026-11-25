@@ -128,7 +128,7 @@ env:
 # differ slightly), so runner and laptop training are reproducible.
 jobs:
   plan:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 20
     outputs:
       config: ${{ steps.fp.outputs.config }}
@@ -210,7 +210,7 @@ jobs:
   pca:
     needs: plan
     if: needs.plan.outputs.hit != 'true' && inputs.cnn != '0' && inputs.refit_pca
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
@@ -231,7 +231,7 @@ jobs:
   infer:
     needs: [plan, pca]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.hit != 'true' && (needs.pca.result == 'success' || needs.pca.result == 'skipped') }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 120
     strategy:
       matrix:
@@ -315,7 +315,7 @@ jobs:
 
   train:
     needs: [plan, infer]
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 240
     strategy:
       matrix:
@@ -370,7 +370,7 @@ jobs:
 
   finish:
     needs: [plan, train]
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 60
     permissions:
       contents: read
@@ -504,7 +504,7 @@ jobs:
   cleanup:
     needs: [plan, pca, infer, train, finish]
     if: always()
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
     permissions:
       actions: write
