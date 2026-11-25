@@ -315,6 +315,8 @@ jobs:
 
   train:
     needs: [plan, infer]
+    # success() would also look at the skipped pca job
+    if: ${{ !cancelled() && needs.infer.result == 'success' }}
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 240
     strategy:
@@ -370,6 +372,7 @@ jobs:
 
   finish:
     needs: [plan, train]
+    if: ${{ !cancelled() && needs.train.result == 'success' }}
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 60
     permissions:
@@ -526,7 +529,13 @@ jobs:
               echo "::error::could not delete $name ($id)"; fail=1
             fi
           done <<< "$ids"
-          left=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
-            --jq '[.artifacts[] | select(.name | startswith("trained-weights-") | not)] | length')
+          # the listing lags behind deletions for a few seconds
+          left=-1
+          for _ in 1 2 3 4 5 6; do
+            left=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+              --jq '.artifacts[] | select((.name | startswith("trained-weights-") | not) and (.expired | not)) | .name' | wc -l)
+            [ "$left" -eq 0 ] && break
+            sleep 5
+          done
           echo "intermediate artifacts left: $left"
           [ "$fail" = 0 ] && [ "$left" = 0 ]
