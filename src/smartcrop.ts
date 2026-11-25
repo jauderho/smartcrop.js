@@ -24,6 +24,7 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+import { builtInSaliency } from './saliency';
 import {
   FEATURE_COUNT,
   featureIndex,
@@ -197,6 +198,12 @@ export interface Options {
    * uses the importanceMap and boost boxes when given.
    */
   scorer: 'classic' | 'learned';
+  /**
+   * Learned scorer only: when no `importanceMap` is given, estimate one with
+   * the built-in pure-JS saliency model (src/saliency.ts, distilled from
+   * U2-Netp). false = score without saliency.
+   */
+  jsSaliency: boolean;
   /**
    * Learned scorer only: crops that keep less than this fraction of the
    * salient mass (importance map if given, else mean of colour-contrast
@@ -812,6 +819,9 @@ const learnedMaps = (
   input: ImgDataLike,
   output: ImgDataLike
 ): LearnedMaps => {
+  const importance =
+    options.importanceMap ??
+    (options.jsSaliency ? builtInSaliency(input) : undefined);
   const factor = LEARNED_GRID;
   const sod = downSample(output, factor);
   const { width: gw, height: gh, data } = sod;
@@ -882,7 +892,7 @@ const learnedMaps = (
       skin,
       sat,
       colorContrastSaliency(input, factor),
-      options.importanceMap ? resampleMap(options.importanceMap, gw, gh) : null,
+      importance ? resampleMap(importance, gw, gh) : null,
       options.boost?.length ? boost : null,
       gradient,
     ],
@@ -1415,6 +1425,7 @@ const DEFAULTS: Options = {
   borderPenalty: 0,
   importanceMapWeight: 0,
   scorer: 'learned',
+  jsSaliency: true,
   contentFloor: 0,
   classicBlend: 0,
   consensus: 0,

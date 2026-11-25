@@ -438,3 +438,30 @@ describe('cnn deep features', () => {
     expect(out.every(Number.isFinite)).toBe(true);
   });
 });
+
+describe('built-in JS saliency', () => {
+  it('maps an image to a 32x32 grid in 0..1', async () => {
+    const { builtInSaliency } = await import('../src/saliency');
+    const c = createCanvas(120, 80);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#4a6';
+    ctx.fillRect(0, 0, 120, 80);
+    ctx.fillStyle = '#e33';
+    ctx.fillRect(50, 30, 20, 20);
+    const m = builtInSaliency(ctx.getImageData(0, 0, 120, 80));
+    expect(m.width).toBe(32);
+    expect(m.height).toBe(32);
+    expect(Math.min(...m.data)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...m.data)).toBeLessThanOrEqual(1);
+    // the red square is more salient than the corner
+    expect(m.data[16 * 32 + 16]).toBeGreaterThan(m.data[0]);
+  });
+
+  it('is on by default for the learned scorer and can be turned off', async () => {
+    const a = await crop(img, { width: 100, height: 100 });
+    const b = await crop(img, { width: 100, height: 100, jsSaliency: false });
+    expectValidResult(a);
+    expectValidResult(b);
+    expect(smartcrop.DEFAULTS.jsSaliency).toBe(true);
+  });
+});
