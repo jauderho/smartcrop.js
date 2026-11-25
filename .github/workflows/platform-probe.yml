@@ -30,6 +30,9 @@ jobs:
       - run: bun scripts/fetch-models.ts
       - name: CPU
         run: (lscpu 2>/dev/null || sysctl -n machdep.cpu.brand_string) | head -20
+      - name: libm hashes (trainer math)
+        run: bun bench/math-probe.ts
+
       - name: Probe, 1 ONNX thread (as the Train workflow)
         run: SMARTCROP_ORT_THREADS=1 bun bench/platform-probe.ts --out probe-${{ matrix.os }}-t1.json
       - name: Probe, default threads
