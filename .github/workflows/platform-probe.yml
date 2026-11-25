@@ -42,3 +42,42 @@ jobs:
           name: probe-${{ matrix.os }}
           path: probe-*.json
           retention-days: 7
+
+  # Does the Train pipeline give byte-identical dumps and weights on these
+  # runner images, and whatever the shard count? Downloads GAICD and FCDB for
+  # the run (never cached, nothing uploaded; only hashes are printed).
+  pipeline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      SMARTCROP_ORT_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+        with:
+          models: 'true'
+      - run: bun scripts/fetch-datasets.ts gaicd fcdb --clean-archives --concurrency 4
+      - run: bun bench/learned/projection-from-shipped.ts
+      - name: Dumps with 2 shards, with 3 shards merged out of order, and weights
+        run: |
+          # shellcheck disable=SC2086,SC2016
+          set -eu
+          L=60
+          W="--with faces,saliency,cnn --cnnk 3 --limit $L"
+          for job in "gaicd train" "gaicd val" "fcdb train"; do
+            set -- $job
+            bun bench/precompute.ts "$1" --split "$2" --limit $L
+            bun bench/learned/dump.ts --dataset "$1" --split "$2" $W --procs 2 --force
+            for k in 2 0 1; do
+              bun bench/learned/dump.ts --dataset "$1" --split "$2" $W --shard "$k/3" --outdir /tmp/d3
+            done
+            bun bench/learned/dump.ts --dataset "$1" --split "$2" $W --merge 3 --outdir /tmp/d3
+          done
+          echo "== dumps, 2 shards"; (cd bench/out/learned && sha256sum *+cnn.bin *+cnn.json)
+          echo "== dumps, 3 shards merged"; (cd /tmp/d3 && sha256sum *+cnn.bin *+cnn.json)
+          bun bench/learned/train.ts --cnn 3 --hidden 32,32 --epochs 3 --ppi 64 --fcdb 0.5 --seed 1 --write --out /tmp/m1.json | tail -3
+          echo "== model"; sha256sum /tmp/m1.json
