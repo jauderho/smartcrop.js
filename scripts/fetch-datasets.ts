@@ -17,9 +17,11 @@
 //   report.json       what was downloaded / what failed
 //
 // Sources:
-//   FCDB  https://github.com/yiling-chen/flickr-cropping-dataset (JSON + Flickr
-//         URLs); URLs that are dead fall back to the author's own copy linked
-//         from that README (Google Drive FCDB.zip).
+//   FCDB  https://github.com/yiling-chen/flickr-cropping-dataset (JSON); the
+//         images come from the author's own copy linked from that README
+//         (Google Drive FCDB.zip, sha256 pinned below). Flickr is not used:
+//         it fails a varying set of URLs per machine and the Drive copies of
+//         those differ from Flickr's, so mixed downloads were not reproducible.
 //   FLMS  http://fangchen.org/proj_page/FLMS_mm14/ (authors' page, via the
 //         bcmi Awesome-Aesthetic-Evaluation-and-Cropping list).
 //   GAICD https://github.com/HuiZeng/Grid-Anchor-based-Image-Cropping-Pytorch
@@ -41,6 +43,8 @@ import { readMat } from './mat5';
 const ROOT = resolve(import.meta.dir, '..');
 const DATA = join(ROOT, 'bench/datasets');
 const DL = join(DATA, '_dl'); // downloaded archives
+const FCDB_DRIVE_SHA256 =
+  '365ecdbb6073da4b1f3273ea170a915803d33ba248971c5c324104e9fe166bd6';
 const RAW = join(DATA, '_raw'); // fresh extraction directories
 
 const args = process.argv.slice(2);
@@ -228,40 +232,31 @@ async function fcdb() {
   const all = sets.flatMap(([split, es]) =>
     es.map((e) => ({ ...e, split, name: basename(new URL(e.url).pathname) }))
   );
-  console.log(`[fcdb] ${all.length} entries, downloading from Flickr...`);
-  const dead: { url: string; reason: string }[] = [];
-  let n = 0;
-  await pool(all, async (e) => {
-    try {
-      await download(e.url, join(imgDir, e.name), true);
-    } catch (err) {
-      dead.push({ url: e.url, reason: (err as Error).message });
-    }
-    if (++n % 200 === 0) console.log(`[fcdb] ${n}/${all.length}`);
-  });
-  const recovered: string[] = [];
-  if (dead.length) {
-    console.log(
-      `[fcdb] ${dead.length} Flickr URLs failed; trying the author's Drive copy`
+  console.log(
+    `[fcdb] ${all.length} entries, images from the author's Drive copy`
+  );
+  await mkdir(DL, { recursive: true });
+  const zip = join(DL, 'fcdb-drive.zip');
+  if (!existsSync(zip))
+    await driveDownload('11R4przja3GE3j36wrtMSovvHMuw-oeOn', zip);
+  const got = new Bun.CryptoHasher('sha256')
+    .update(await Bun.file(zip).bytes())
+    .digest('hex');
+  if (got !== FCDB_DRIVE_SHA256)
+    throw new Error(
+      `[fcdb] fcdb-drive.zip sha256 ${got} != pinned ${FCDB_DRIVE_SHA256}`
     );
-    try {
-      await mkdir(DL, { recursive: true });
-      const zip = join(DL, 'fcdb-drive.zip');
-      await driveDownload('11R4przja3GE3j36wrtMSovvHMuw-oeOn', zip);
-      const dir = await extract(zip, 'fcdb-drive');
-      for (const d of dead) {
-        const name = basename(new URL(d.url).pathname);
-        const src = join(dir, 'FCDB', name);
-        if (existsSync(src)) {
-          await copyFile(src, join(imgDir, name));
-          recovered.push(d.url);
-        }
-      }
-      await rm(dir, { recursive: true, force: true });
-    } catch (err) {
-      console.log(`[fcdb] Drive fallback failed: ${(err as Error).message}`);
-    }
+  const dir = await extract(zip, 'fcdb-drive');
+  const dead: { url: string; reason: string }[] = [];
+  const recovered: string[] = [];
+  for (const e of all) {
+    const src = join(dir, 'FCDB', e.name);
+    if (existsSync(src)) {
+      await copyFile(src, join(imgDir, e.name));
+      recovered.push(e.url);
+    } else dead.push({ url: e.url, reason: 'not in the Drive copy' });
   }
+  await rm(dir, { recursive: true, force: true });
   const stillDead = dead.filter((d) => !recovered.includes(d.url));
   const anns: Ann[] = [];
   const unreadable: string[] = [];
@@ -287,8 +282,8 @@ async function fcdb() {
   await writeOut('fcdb', anns, {
     source: repo,
     entries: all.length,
-    flickrFailed: dead.length,
-    recoveredFromDrive: recovered.length,
+    imagesFrom: 'drive',
+    fromDrive: recovered.length,
     stillMissing: stillDead,
     unreadable,
     boxesClamped: clamped,
@@ -296,7 +291,7 @@ async function fcdb() {
     test: anns.filter((a) => a.split === 'test').length,
   });
   console.log(
-    `[fcdb] flickr failed ${dead.length}, recovered ${recovered.length}, missing ${stillDead.length}, unreadable ${unreadable.length}, clamped ${clamped}`
+    `[fcdb] from Drive ${recovered.length}, missing ${stillDead.length}, unreadable ${unreadable.length}, clamped ${clamped}`
   );
 }
 
