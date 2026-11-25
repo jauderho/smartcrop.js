@@ -51,8 +51,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04-arm, ubuntu-26.04-arm]
+        rep: [1, 2]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       SMARTCROP_ORT_THREADS: '1'
     steps:
@@ -66,11 +67,15 @@ jobs:
         run: |
           # shellcheck disable=SC2086,SC2016
           set -eu
-          L=60
+          grep -m1 -E 'Model name|CPU part' /proc/cpuinfo || true; lscpu | grep -E 'Model name|Vendor|Flags' | cut -c1-300
+          L=400
           W="--with faces,saliency,cnn --cnnk 3 --limit $L"
           for job in "gaicd train" "gaicd val" "fcdb train"; do
             set -- $job
-            bun bench/precompute.ts "$1" --split "$2" --limit $L
+            for k in 0 1 2 3; do
+              bun bench/precompute.ts "$1" --split "$2" --limit $L --shard "$k/4" &
+            done
+            wait
             bun bench/learned/dump.ts --dataset "$1" --split "$2" $W --procs 2 --force
             for k in 2 0 1; do
               bun bench/learned/dump.ts --dataset "$1" --split "$2" $W --shard "$k/3" --outdir /tmp/d3
