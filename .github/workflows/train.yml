@@ -249,6 +249,19 @@ jobs:
           bun scripts/fetch-datasets.ts gaicd fcdb --clean-archives --concurrency 4
           du -sh bench/datasets/*
 
+      - name: Dataset fingerprint (hashes only; compare across runs)
+        run: |
+          set -eu
+          cd bench/datasets
+          for d in gaicd fcdb; do
+            find "$d" -type f \( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' -o -name '*.json' \) -print0 \
+              | sort -z | xargs -0 sha256sum > "/tmp/$d.sha"
+            echo "dataset $d: $(wc -l < "/tmp/$d.sha") files, sha256 $(sha256sum < "/tmp/$d.sha" | cut -c1-16)"
+          done
+          echo "::group::per-file sha256"
+          cat /tmp/gaicd.sha /tmp/fcdb.sha
+          echo "::endgroup::"
+
       - name: Check the downloaded datasets are complete
         run: |
           # The gate compares against weights trained on the full splits; dead
@@ -348,6 +361,7 @@ jobs:
             bun bench/learned/dump.ts --dataset "$1" --split "$2" $with --merge "$S"
           done
           ls -la bench/out/learned
+          echo "dump hashes:"; (cd bench/out/learned && sha256sum ./*.bin ./*.json)
 
       - name: Train ensemble member (seed ${{ matrix.seed }})
         run: |
@@ -361,6 +375,7 @@ jobs:
           seed=${{ matrix.seed }}
           bun bench/learned/train.ts $flags --seed "$seed" --write --out "out/members/m$seed.json" > "out/members/m$seed.log" 2>&1 || { echo "member $seed failed"; tail -20 "out/members/m$seed.log"; exit 1; }
           grep -h '^hidden=' "out/members/m$seed.log"
+          echo "member hash: $(sha256sum "out/members/m$seed.json")"
 
       - name: Share the member within this run
         uses: actions/upload-artifact@v4
