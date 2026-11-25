@@ -306,15 +306,69 @@ gate on either machine.
 **Recommendations**
 
 1. For bit-for-bit reproducibility with laptop runs, run Train on
-   `ubuntu-24.04-arm`; its outputs match the M2 exactly in the probe. Its
+   `ubuntu-26.04-arm`; its outputs match the M2 exactly in the probe. Its
    speed on a full run is not measured yet (the probe was slower on
    saliency, 12.2s vs 6.7s for 12 images).
 2. Make the gate robust to seed noise: train an ensemble (e.g. 4 seeds, run
    in parallel) or require the new model to beat the shipped one by more
    than the seed spread, rather than single seed vs margin 0.
 
-**Applied** (after this comparison): Train runs on `ubuntu-24.04-arm`,
+**Applied** (after this comparison): Train runs on `ubuntu-26.04-arm`,
 trains a 4-seed ensemble by default, and the gate fails only when the new
 model scores below the shipped one by more than `gate_tolerance` (default
 0.01, the measured single-seed spread of the selection score). A regression
 beyond training noise fails; noise-level differences pass.
+
+## Parallel Train workflow (measured 2026-11-24)
+
+`train.yml` is now a set of jobs: `plan` (inputs, fingerprint, weights cache),
+`infer` (matrix of `infer_jobs`, default 8, each 4 processes x 1 ONNX thread:
+plug-in inference and feature-dump shards `--shard s/S`, S = 4 x jobs),
+`train` (one job per ensemble member), `finish` (combine, gate, shrink,
+manifest, artifact, cache) and `cleanup` (always runs, deletes every artifact
+of the run except the weights). Dump shards are the only derived data that
+leaves a runner: artifacts with `retention-days: 1`, deleted by `cleanup`
+(verified: no intermediate artifact was left after the run). The datasets are
+downloaded by each `infer` job (GAICD and FCDB only; FLMS is not used by
+training) and never cached. `dump.ts --merge S` merges the shards in input
+order, so the dumps do not depend on the shard count.
+
+| stage / job               | single job, 24.04-arm (run 45233596484) | parallel, 26.04-arm (run 45517232597) |
+| ------------------------- | --------------------------------------: | ------------------------------------: |
+| dataset download          |                                   1m53s |              each infer job 36s-3m41s |
+| plug-in inference + dumps |                      19m36s + 46s dumps |        2m35s per job (8 jobs at once) |
+| training (30 epochs)      |          5m57s (4 at once, 1 vCPU each) |     5m58s per member (4 jobs at once) |
+| combine, gate, shrink     |                                     21s |               finish job 48s in total |
+| whole run, wall clock     |                                  28m56s |                                15m07s |
+
+Where the parallel 15m07s goes: about 40 s to start `plan` and the first
+runners, infer jobs 3m24s to 6m37s (the slowest paid 3m41s for the download,
+the rest 36-63 s), about 20 s of runner start for `train`, 6m20s for training,
+48 s `finish`, 22 s `cleanup`. Training is now the floor: one seed is one
+single-threaded process, so more runners do not shorten it. More than 8
+inference jobs would only trim the 2m35s of compute and add download time per
+job, so 8 is the default (`infer_jobs`). Cost: about 8 x 4 min + 4 x 6.5 min +
+small jobs, roughly 60 runner-minutes against 29 for the single job. Peak
+concurrency is 8 jobs (the 4-vCPU arm runners).
+
+**Reproducibility checks**
+
+- Dumps are byte-identical for any shard count and any shard order
+  (`dump.ts` with 2, 3, 4 and 7 shards, merged, local); the Platform probe
+  workflow's `pipeline` job repeats this on 24.04-arm and 26.04-arm with two
+  repeats each (400 images per split, plug-in inference, 2 vs 3 shards):
+  all four jobs give the same dump hashes and the same 3-epoch model hash.
+  The runners are all Neoverse-N2. `ubuntu-26.04-arm` also matches the M2
+  bit for bit in the ONNX/crop probe (`platform-probe.ts --compare`).
+- The libm-backed `Math` functions used by training (`exp`, `log`, ...) give
+  the same results on 24.04-arm and 26.04-arm, but not on macOS
+  (`bench/math-probe.ts`), so feature dumps and trained weights are
+  reproducible between Linux arm runners, not between a Mac and a runner.
+- The full-size baseline and the full-size parallel run did not give
+  byte-identical weights (model-full.json differs from the first epoch; val
+  SRCC 0.8139 vs 0.8162, both pass the gate). The pipeline checks above
+  rule out the shard count and the 24.04 / 26.04 image on 800 images; the
+  two runs were a day apart, and the datasets (FCDB comes from live Flickr
+  URLs) are downloaded fresh each time, so a change in the downloaded
+  images is the open suspect. The Train budget did not allow a same-day
+  repeat to settle it.
