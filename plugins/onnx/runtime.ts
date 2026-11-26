@@ -1,8 +1,10 @@
 // Shared lazy loader for onnxruntime-node and model sessions.
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
+import { createMpsSession, type Session } from './mps';
 
+export type { Session };
 type Ort = typeof import('onnxruntime-node');
-export type Session = import('onnxruntime-node').InferenceSession;
 
 // CoreML flags: MLProgram format (the older NeuralNetwork format is slower
 // than CPU), static input shapes only (dynamic-shape graphs such as the cnn
@@ -10,32 +12,43 @@ export type Session = import('onnxruntime-node').InferenceSession;
 // Neural Engine is slower for these models or fails to compile them.
 const COREML_FLAGS = 0x010 | 0x008 | 0x020;
 
-type Backend = 'coreml' | 'cpu';
+type Backend = 'apple' | 'mps' | 'coreml' | 'cpu';
 /**
- * Inference backend: SMARTCROP_BACKEND=coreml|cpu.
+ * Inference backend: SMARTCROP_BACKEND=apple|mps|coreml|cpu.
+ *   mps     PyTorch on the Apple GPU (plugins/onnx/mps.ts), ~4x faster than
+ *           CPU for IS-Net (276 vs 1068 ms on an M2) but slower than CoreML
+ *           for small models (worker round trip). Needs uv (or
+ *           SMARTCROP_MPS_PYTHON); a worker that won't start, or a model it
+ *           can't convert or run, falls back to coreml.
  *   coreml  onnxruntime's CoreML provider, CPU for what CoreML can't run;
- *           ~2x faster than CPU (U2-Netp 93 vs 175 ms on an M2).
+ *           ~2x faster than CPU (U2-Netp 93 vs 175 ms).
+ *   apple   mps for models of MPS_MIN_BYTES or more, coreml for smaller ones.
  *   cpu     onnxruntime on the CPU: the only backend whose outputs match the
- *           Linux Train workflow bit for bit (CoreML differs by ~1e-4).
- * Default: coreml on Apple silicon, else cpu.
+ *           Linux Train workflow bit for bit (others differ by ~1e-6-1e-4).
+ * Default: apple on Apple silicon, else cpu.
  */
 export const backend = (): Backend => {
   const b =
     process.env.SMARTCROP_BACKEND ||
     (process.platform === 'darwin' && process.arch === 'arm64'
-      ? 'coreml'
+      ? 'apple'
       : 'cpu');
-  if (b !== 'coreml' && b !== 'cpu')
-    throw new Error(`SMARTCROP_BACKEND must be coreml or cpu, got ${b}`);
+  if (b !== 'apple' && b !== 'mps' && b !== 'coreml' && b !== 'cpu')
+    throw new Error(
+      `SMARTCROP_BACKEND must be apple, mps, coreml or cpu, got ${b}`
+    );
   return b;
 };
+// Measured crossover: U2-Netp (4.6 MB) and MobileNetV2 (14 MB) are faster on
+// CoreML, IS-Net (170 MB) on MPS.
+const MPS_MIN_BYTES = 50e6;
 
 /**
  * Session options. SMARTCROP_ORT_THREADS caps onnxruntime's intra-op threads
  * (default: onnxruntime's own choice, all cores); useful when several worker
  * processes share a machine.
  */
-export const sessionOptions = (ep: Backend = 'cpu') => {
+export const sessionOptions = (ep: 'coreml' | 'cpu' = 'cpu') => {
   const t = Number(process.env.SMARTCROP_ORT_THREADS);
   return {
     logSeverityLevel: 3 as const,
@@ -47,16 +60,61 @@ export const sessionOptions = (ep: Backend = 'cpu') => {
   };
 };
 
-/** Session on the chosen backend; CPU if CoreML can't load the model. */
-export const createSession = async (
-  model: string | Uint8Array
+const ortSession = async (
+  model: string | Uint8Array,
+  b: 'coreml' | 'cpu'
 ): Promise<Session> => {
   const ort = await getOrt();
   // `as string`: create() has one overload per argument type.
-  const open = (ep: Backend) =>
+  const open = (ep: 'coreml' | 'cpu') =>
     ort.InferenceSession.create(model as string, sessionOptions(ep));
-  const b = backend();
   return b === 'cpu' ? open('cpu') : open('coreml').catch(() => open('cpu'));
+};
+
+/**
+ * Session on the chosen backend. MPS falls back to CoreML (then CPU) for a
+ * model, for good, when the worker can't start, the model doesn't convert,
+ * or a run fails (onnx2torch converts some ops it can't execute; the worker
+ * may die).
+ */
+export const createSession = async (
+  model: string | Uint8Array
+): Promise<Session> => {
+  let b = backend();
+  if (b === 'apple') {
+    const size =
+      typeof model === 'string' ? statSync(model).size : model.byteLength;
+    b = size >= MPS_MIN_BYTES ? 'mps' : 'coreml';
+  }
+  if (b !== 'mps') return ortSession(model, b);
+  const name = typeof model === 'string' ? model.split('/').pop() : 'model';
+  const fallback = (e: unknown) => {
+    console.warn(
+      `smartcrop: ${name} on CoreML, not MPS (${(e as Error).message.split('\n')[0]})`
+    );
+    return ortSession(model, 'coreml');
+  };
+  let mps: Session;
+  try {
+    mps = await createMpsSession(model);
+  } catch (e) {
+    return fallback(e);
+  }
+  let ort: Promise<Session> | undefined;
+  return {
+    inputNames: mps.inputNames,
+    outputNames: mps.outputNames,
+    async run(feeds) {
+      if (!ort) {
+        try {
+          return await mps.run(feeds);
+        } catch (e) {
+          ort ??= fallback(e);
+        }
+      }
+      return (await ort).run(feeds);
+    },
+  };
 };
 
 export const modelDir = join(import.meta.dir, '../../bench/models');

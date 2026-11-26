@@ -176,9 +176,11 @@ onnxruntime-node, and no image leaves the machine:
 
 They lift the learned scorer to the best numbers in the table above.
 
-On Apple silicon they run on the GPU through onnxruntime's CoreML provider,
-with the CPU for anything CoreML can't run. `SMARTCROP_BACKEND=cpu` gives
-outputs identical to the Linux training runs.
+On Apple silicon they run on the GPU: small models through onnxruntime's
+CoreML provider, models of 50 MB or more with PyTorch on MPS (started through
+`uv`, or the Python in `SMARTCROP_MPS_PYTHON`). Anything that can't run there
+falls back to the CPU. `SMARTCROP_BACKEND=cpu` gives outputs identical to the
+Linux training runs; `mps` or `coreml` force one GPU path.
 
 ```sh
 bun scripts/fetch-models.ts   # downloads both models (checksummed) into bench/models/
