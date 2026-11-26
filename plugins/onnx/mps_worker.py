@@ -49,6 +49,18 @@ except Exception as e:  # noqa: BLE001 - report any import/setup failure
 send({'ready': True, 'torch': torch.__version__})
 models = []
 
+
+def patch(proto):
+    """Work around onnx2torch bugs in place, keeping the model's maths."""
+    for i, n in enumerate(proto.graph.node):
+        # A Split into one output becomes torch.split's 1-tuple, which
+        # onnx2torch passes on instead of the tensor (breaks UNISAL's
+        # Squeeze). Splitting into one part is a copy.
+        if n.op_type == 'Split' and len(n.output) == 1:
+            proto.graph.node[i].CopyFrom(
+                onnx.helper.make_node('Identity', [n.input[0]], [n.output[0]], name=n.name))
+    return proto
+
 while True:
     (hl,) = struct.unpack('<I', read_exact(4))
     req = json.loads(read_exact(hl))
@@ -59,7 +71,7 @@ while True:
             init = {i.name for i in proto.graph.initializer}
             names_in = [i.name for i in proto.graph.input if i.name not in init]
             names_out = [o.name for o in proto.graph.output]
-            net = convert(proto).eval().to('mps')
+            net = convert(patch(proto)).eval().to('mps')
             models.append((net, names_in, names_out))
             send({'id': len(models) - 1, 'inputs': names_in, 'outputs': names_out})
         elif req['op'] == 'run':
