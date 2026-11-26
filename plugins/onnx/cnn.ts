@@ -16,15 +16,15 @@ import { join } from 'node:path';
 import type { FeatureMap, PackedCnn } from '../../src/cnn';
 import { decodeF16 } from '../../src/learned';
 import {
+  createSession,
   getOrt,
   modelDir,
   resizeRGBA,
-  sessionOptions,
   type RGBAImage,
 } from './runtime';
 import { patchOnnx } from './onnx-patch';
 
-type Session = import('onnxruntime-node').InferenceSession;
+type Session = import('./runtime').Session;
 
 const SHORT_SIDE = 256;
 const MEAN = [0.485, 0.456, 0.406];
@@ -56,9 +56,8 @@ const getBackbone = (path: string): Promise<Session> => {
   let s = sessions.get(path);
   if (!s) {
     s = (async () => {
-      const ort = await getOrt();
       const bytes = patchOnnx(new Uint8Array(await readFile(path)), [...TAPS]);
-      return ort.InferenceSession.create(bytes, sessionOptions());
+      return createSession(bytes);
     })();
     sessions.set(path, s);
   }

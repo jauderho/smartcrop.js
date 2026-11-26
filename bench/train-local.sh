@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 out=${1:?usage: bench/train-local.sh <outdir>}
 mkdir -p "$out"
 export SMARTCROP_CACHE_DIR="$out/cache"
+export SMARTCROP_BACKEND=cpu # as the Linux runner
 log="$out/timings.txt"
 : > "$log"
 stage() { # name, command...

@@ -2,19 +2,61 @@
 import { join } from 'node:path';
 
 type Ort = typeof import('onnxruntime-node');
-type Session = import('onnxruntime-node').InferenceSession;
+export type Session = import('onnxruntime-node').InferenceSession;
+
+// CoreML flags: MLProgram format (the older NeuralNetwork format is slower
+// than CPU), static input shapes only (dynamic-shape graphs such as the cnn
+// backbone stay on CPU instead of recompiling per size), CPU + GPU: the
+// Neural Engine is slower for these models or fails to compile them.
+const COREML_FLAGS = 0x010 | 0x008 | 0x020;
+
+type Backend = 'coreml' | 'cpu';
+/**
+ * Inference backend: SMARTCROP_BACKEND=coreml|cpu.
+ *   coreml  onnxruntime's CoreML provider, CPU for what CoreML can't run;
+ *           ~2x faster than CPU (U2-Netp 93 vs 175 ms on an M2).
+ *   cpu     onnxruntime on the CPU: the only backend whose outputs match the
+ *           Linux Train workflow bit for bit (CoreML differs by ~1e-4).
+ * Default: coreml on Apple silicon, else cpu.
+ */
+export const backend = (): Backend => {
+  const b =
+    process.env.SMARTCROP_BACKEND ||
+    (process.platform === 'darwin' && process.arch === 'arm64'
+      ? 'coreml'
+      : 'cpu');
+  if (b !== 'coreml' && b !== 'cpu')
+    throw new Error(`SMARTCROP_BACKEND must be coreml or cpu, got ${b}`);
+  return b;
+};
 
 /**
  * Session options. SMARTCROP_ORT_THREADS caps onnxruntime's intra-op threads
  * (default: onnxruntime's own choice, all cores); useful when several worker
  * processes share a machine.
  */
-export const sessionOptions = () => {
+export const sessionOptions = (ep: Backend = 'cpu') => {
   const t = Number(process.env.SMARTCROP_ORT_THREADS);
   return {
     logSeverityLevel: 3 as const,
+    executionProviders:
+      ep === 'coreml'
+        ? [{ name: 'coreml', coreMlFlags: COREML_FLAGS }, 'cpu']
+        : ['cpu'],
     ...(t > 0 ? { intraOpNumThreads: t, interOpNumThreads: 1 } : {}),
   };
+};
+
+/** Session on the chosen backend; CPU if CoreML can't load the model. */
+export const createSession = async (
+  model: string | Uint8Array
+): Promise<Session> => {
+  const ort = await getOrt();
+  // `as string`: create() has one overload per argument type.
+  const open = (ep: Backend) =>
+    ort.InferenceSession.create(model as string, sessionOptions(ep));
+  const b = backend();
+  return b === 'cpu' ? open('cpu') : open('coreml').catch(() => open('cpu'));
 };
 
 export const modelDir = join(import.meta.dir, '../../bench/models');
@@ -28,9 +70,7 @@ const sessions = new Map<string, Promise<Session>>();
 export const getSession = (path: string): Promise<Session> => {
   let s = sessions.get(path);
   if (!s) {
-    s = getOrt().then((ort) =>
-      ort.InferenceSession.create(path, sessionOptions())
-    );
+    s = createSession(path);
     sessions.set(path, s);
   }
   return s;

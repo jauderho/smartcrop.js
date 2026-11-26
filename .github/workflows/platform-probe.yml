@@ -18,6 +18,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      SMARTCROP_BACKEND: cpu # GPU backends are the Apple-silicon default; probe the CPU path
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
