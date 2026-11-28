@@ -1,11 +1,12 @@
 name: Release
 
 # Push a tag vX.Y.Z (matching package.json) to build, test, publish
-# @jauderho/smartcrop to npm with provenance, and create the GitHub release
+# @jauderho/smartcrop.js to npm with provenance, and create the GitHub release
 # with the built files attached.
 #
-# npm auth: add an NPM_TOKEN repository secret (an npm automation or granular
-# token with publish rights on @jauderho/smartcrop).
+# npm auth: trusted publishing (OIDC), no token. The package's trusted
+# publisher on npmjs.com is this repository + release.yml; provenance is
+# generated automatically. Needs npm >= 11.5.1 and Node >= 22.14.
 on:
   push:
     tags: ['v*']
@@ -31,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing + provenance
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
@@ -43,6 +44,8 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: npm with trusted publishing (>= 11.5.1)
+        run: npm install -g npm@^11.5.1 && npm --version
       - run: bun install --frozen-lockfile
       - name: Tag matches package.json
         run: |
@@ -58,13 +61,11 @@ jobs:
           npm pack
           (cd dist && zip -r "../smartcrop-${TAG#v}-dist.zip" .)
       - name: Publish to npm
-        run: npm publish --provenance --access public jauderho-smartcrop-*.tgz
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public jauderho-smartcrop.js-*.tgz
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes=$(awk "/^### ${TAG#v}\$/{f=1;next} /^### /{f=0} f" README.md)
           gh release create "$TAG" --verify-tag --title "$TAG" --notes "$notes" \
-            jauderho-smartcrop-*.tgz "smartcrop-${TAG#v}-dist.zip"
+            jauderho-smartcrop.js-*.tgz "smartcrop-${TAG#v}-dist.zip"

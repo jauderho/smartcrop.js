@@ -261,15 +261,15 @@ detection. With the CNN head it was validated on 1,345 held-out images: IoU
 
 ## Download/ Installation
 
-This fork is published to npm as [`@jauderho/smartcrop`](https://www.npmjs.com/package/@jauderho/smartcrop)
+This fork is published to npm as [`@jauderho/smartcrop.js`](https://www.npmjs.com/package/@jauderho/smartcrop.js)
 (the unscoped `smartcrop` package is the original 2.x release):
 
 ```sh
-npm install @jauderho/smartcrop   # or: bun add @jauderho/smartcrop
+npm install @jauderho/smartcrop.js   # or: bun add @jauderho/smartcrop.js
 ```
 
 ```javascript
-import smartcrop from '@jauderho/smartcrop';
+import smartcrop from '@jauderho/smartcrop.js';
 ```
 
 The built files are also attached to each [GitHub release](https://github.com/jauderho/smartcrop.js/releases), or build them from source:
@@ -489,7 +489,7 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 
 ### 3.0.0
 
-- Published to npm as `@jauderho/smartcrop`.
+- Published to npm as `@jauderho/smartcrop.js`.
 - Breaking: the learned crop scorer, trained on human-rated crops, is now the default. It is about 10x slower than the classic scorer (roughly 90 ms vs 9 ms per image in Node) and searches tighter crops (`minScale` 0.4). `PRESETS.classic` (`scorer: 'classic'`) keeps the original crops exactly.
 - Optional local ONNX face, saliency and CNN-feature plug-ins (`plugins/onnx`), with pinned model checksums. They live in the repository and are not part of the npm package yet.
 - `result.position`, `candidates`, and opt-in classic terms (`luminance`, `centerWeight`, `textureDamping`, `saliencyWeight`, `borderPenalty`, `importanceMap`).

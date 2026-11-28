@@ -1,5 +1,5 @@
 {
-  "name": "@jauderho/smartcrop",
+  "name": "@jauderho/smartcrop.js",
   "version": "3.0.0",
   "description": "Content aware image cropping, with a learned crop scorer.",
   "homepage": "https://github.com/jauderho/smartcrop.js",
