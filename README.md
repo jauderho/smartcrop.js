@@ -495,6 +495,7 @@ In other words, it's fine to run it on one image, it's suboptimal to run it on a
 - Published to npm as `@jauderho/smartcrop.js`.
 - Breaking: the learned crop scorer, trained on human-rated crops, is now the default. It is about 10x slower than the classic scorer (roughly 90 ms vs 9 ms per image in Node) and searches tighter crops (`minScale` 0.4). `PRESETS.classic` (`scorer: 'classic'`) keeps the original crops exactly.
 - Optional local ONNX face, saliency and CNN-feature plug-ins (`plugins/onnx`), with pinned model checksums. They live in the repository and are not part of the npm package yet.
+- The CNN-feature plug-in uses a MobileNetV2 fine-tuned for crop ranking ([crop-tuned MobileNetV2](https://huggingface.co/frappe0w/smartcrop-mobilenetv2-crop)), with a retrained head (GAICD test SRCC 0.821 vs 0.793 for the frozen ImageNet backbone).
 - `result.position`, `candidates`, and opt-in classic terms (`luminance`, `centerWeight`, `textureDamping`, `saliencyWeight`, `borderPenalty`, `importanceMap`).
 - Benchmark, tuning and gallery tooling in `bench/`.
 - TypeScript source (`src/smartcrop.ts`) and generated type definitions.
