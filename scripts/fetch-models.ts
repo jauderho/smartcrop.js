@@ -23,12 +23,13 @@ const MODELS = [
     minBytes: 1_000_000,
   },
   {
-    // ImageNet MobileNetV2 (MXNet Gluon) from the ONNX model zoo; used as a
-    // frozen feature backbone by plugins/onnx/cnn.ts.
-    name: 'mobilenetv2-12.onnx',
-    sha256: 'c0c3f76d93fa3fd6580652a45618618a220fced18babf65774ed169de0432ad5',
-    url: 'https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx',
-    license: 'Apache-2.0 (ONNX Model Zoo)',
+    // Crop-tuned MobileNetV2: the ONNX model zoo mobilenetv2-12.onnx (same
+    // graph and tensor names) fine-tuned end to end for crop ranking; the
+    // feature backbone of plugins/onnx/cnn.ts. Pinned to a Hugging Face commit.
+    name: 'mobilenetv2-crop.onnx',
+    sha256: '454e6f46e8273a5fe7b78d3b339f6c3f7e006a301b9d2837bc1098cd6f3c6086',
+    url: 'https://huggingface.co/frappe0w/smartcrop-mobilenetv2-crop/resolve/d7666b73d644296f689425eeb64ff2b1bbb15733/mobilenetv2-crop.onnx',
+    license: 'Apache-2.0 (fine-tuned from the ONNX Model Zoo MobileNetV2)',
     minBytes: 10_000_000,
   },
 ];

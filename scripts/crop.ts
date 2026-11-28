@@ -36,7 +36,7 @@ const FACE_MIN_SCORE = 0.6;
 const MODELS = [
   'face_detection_yunet_2023mar.onnx',
   'u2netp.onnx',
-  'mobilenetv2-12.onnx',
+  'mobilenetv2-crop.onnx',
 ];
 
 const args = process.argv.slice(2);

@@ -171,8 +171,9 @@ onnxruntime-node, and no image leaves the machine:
 
 - YuNet faces, 0.2 MB;
 - U²-Netp salient objects, 4.6 MB;
-- MobileNetV2 (ImageNet, ONNX model zoo, Apache-2.0), 14 MB, used as a frozen
-  feature backbone for the optional CNN head (below).
+- crop-tuned MobileNetV2, 14 MB: the ONNX model zoo MobileNetV2 fine-tuned
+  for crop ranking ([on Hugging Face](https://huggingface.co/frappe0w/smartcrop-mobilenetv2-crop),
+  Apache-2.0). It is the feature backbone of the optional CNN head (below).
 
 They lift the learned scorer to the best numbers in the table above.
 
@@ -205,12 +206,14 @@ JavaScript for the browser and Node.
 
 #### Optional CNN features
 
-The best results come from adding deep image features. A frozen MobileNetV2
-produces a feature map once per image (about 16 ms). The scorer then pools
+The best results come from adding deep image features. A MobileNetV2
+fine-tuned end to end for crop ranking (GAICD test SRCC 0.821, against 0.793
+for the frozen ImageNet backbone) produces a feature map once per image
+(about 16 ms). The scorer then pools
 it inside each candidate crop (RoI) and over the area the crop cuts away
 (RoD), as GAIC does, and a second learned head ranks the crops with these
 features plus the hand-made ones. The pooling runs in plain JS, and the head
-and its fixed PCA projection ship separately as float16
+and the backbone's learned projection ship separately as float16
 (`src/learned-cnn-weights.ts`, about 113 KB of source). The core bundle does
 not include them.
 
