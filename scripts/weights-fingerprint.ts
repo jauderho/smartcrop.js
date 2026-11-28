@@ -129,7 +129,10 @@ export async function fingerprint(
     // Without a PCA refit the projection of the shipped cnn weights is an input.
     const w = join(root, weightsFileOf('cnn'));
     const m = existsSync(w)
-      ? (await readFile(w, 'utf8')).match(/"projection":"([^"]*)"/)
+      ? // JSON as written by shrink.ts, or TS after bun fmt
+        (await readFile(w, 'utf8')).match(
+          /["']?projection["']?:\s*["']([^"']*)["']/
+        )
       : null;
     parts['projection'] = m ? sha(m[1]) : 'missing';
   }

@@ -1,6 +1,6 @@
 // Deep-feature plug-in (MobileNetV2 via onnxruntime-node) for the learned
-// scorer's `featureMap` option. Model: bench/models/mobilenetv2-12.onnx
-// (`bun scripts/fetch-models.ts`), a frozen ImageNet backbone.
+// scorer's `featureMap` option. Model: bench/models/mobilenetv2-crop.onnx
+// (`bun scripts/fetch-models.ts`), MobileNetV2 fine-tuned for crop ranking.
 //
 //   const featureMap = await cnnFeatureMap(imageData);
 //   const cnnModel = LEARNED_CNN_PACKED; // src/learned-cnn-weights.ts
@@ -9,8 +9,8 @@
 // The image is resized to a 256 px short side (dims rounded to multiples of
 // 32), the stride 8, 16 and 32 feature maps are resampled to the stride-16 grid
 // and concatenated (32 + 96 + 320 = 448 channels), then projected to C channels
-// by a fixed linear map (PCA fitted on GAICD train images) so that crop
-// pooling in JS (src/cnn.ts) stays cheap.
+// by a fixed linear map (learned with the backbone, initialised from a PCA on
+// GAICD train images) so that crop pooling in JS (src/cnn.ts) stays cheap.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FeatureMap, PackedCnn } from '../../src/cnn';
@@ -29,7 +29,7 @@ type Session = import('./runtime').Session;
 const SHORT_SIDE = 256;
 const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
-// Stride 8, 16, 32 tensors of mobilenetv2-12.onnx.
+// Stride 8, 16, 32 tensors (tensor names of the model zoo mobilenetv2-12.onnx).
 const TAPS = ['365', '426', '624'] as const;
 const TAP_CHANNELS = [32, 96, 320];
 export const RAW_CHANNELS = 448;
@@ -110,7 +110,7 @@ export async function cnnRawMap(
 ): Promise<FeatureMap> {
   const ort = await getOrt();
   const session = await getBackbone(
-    opts.modelPath ?? join(modelDir, 'mobilenetv2-12.onnx')
+    opts.modelPath ?? join(modelDir, 'mobilenetv2-crop.onnx')
   );
   const scale = SHORT_SIDE / Math.min(image.width, image.height);
   const W = round32(image.width * scale);
