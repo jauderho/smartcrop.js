@@ -1,0 +1,48 @@
+{
+  "scheme": 1,
+  "heads": {
+    "cnn": {
+      "fingerprint": "8fe6c2b8edc36da89c5f77347a091c36acc470ec4889b56d8d532ca47e566f5e",
+      "config": {
+        "cnn": 3,
+        "cosine": false,
+        "ema": 0,
+        "ensemble": 4,
+        "epochs": 30,
+        "fcdb": 0.5,
+        "hidden": "32,32",
+        "l2": 0.003,
+        "lambda": 0,
+        "lr": 0.002,
+        "ppi": 64,
+        "refitPca": false,
+        "seed": 1
+      },
+      "weightsSha256": "64399a921ec9ba2148dff6475e2ffb97df1f5ee69d94124053a5e5e77a0259e7",
+      "weightsFile": "src/learned-cnn-weights.ts",
+      "recordedAt": "2026-11-28T08:10:08.645Z",
+      "metrics": {
+        "shipped": {
+          "srcc": 0.8175135741291072,
+          "acc1_5": 54,
+          "acc1_10": 74.5,
+          "top1": 0.7265749999999999,
+          "holdoutIoU": 0.7875300485880594,
+          "score": 1.6050436227171665
+        },
+        "next": {
+          "srcc": 0.8379777458260195,
+          "acc1_5": 53,
+          "acc1_10": 71.5,
+          "top1": 0.7269249999999999,
+          "holdoutIoU": 0.7795969115782565,
+          "score": 1.617574657404276
+        },
+        "tolerance": 0.01,
+        "pass": true,
+        "cnnK": 3,
+        "fcdbW": 0.5
+      }
+    }
+  }
+}

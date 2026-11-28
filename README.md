@@ -214,7 +214,7 @@ it inside each candidate crop (RoI) and over the area the crop cuts away
 (RoD), as GAIC does, and a second learned head ranks the crops with these
 features plus the hand-made ones. The pooling runs in plain JS, and the head
 and the backbone's learned projection ship separately as float16
-(`src/learned-cnn-weights.ts`, about 113 KB of source). The core bundle does
+(`src/learned-cnn-weights.ts`, about 320 KB of source, an ensemble of 4 heads). The core bundle does
 not include them.
 
 ```javascript
